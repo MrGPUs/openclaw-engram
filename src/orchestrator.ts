@@ -26,6 +26,17 @@ import { BootstrapEngine } from "./bootstrap.js";
 import { inferIntentFromText, intentCompatibilityScore, planRecallMode } from "./intent.js";
 import { BoxBuilder, type BoxFrontmatter } from "./boxes.js";
 import { classifyMemoryKind } from "./himem.js";
+import {
+  indexMemoriesBatch,
+  clearIndexes,
+  indexesExist,
+  deindexMemory,
+  queryByDateRangeAsync,
+  queryByTagsAsync,
+  isTemporalQuery,
+  recencyWindowFromPrompt,
+  extractTagsFromPrompt,
+} from "./temporal-index.js";
 import type { MemorySummary } from "./types.js";
 import { chunkTranscriptEntries } from "./conversation-index/chunker.js";
 import { writeConversationChunks } from "./conversation-index/indexer.js";
@@ -1191,16 +1202,33 @@ export class Orchestrator {
           const activeMemories = memories.filter(
             (m) => !m.frontmatter.status || m.frontmatter.status === "active",
           );
-          const recent = activeMemories
+          // Convert all active memories to QmdSearchResult with recency-based
+          // baseline score, then pass through boostSearchResults so temporal/tag
+          // boosts apply consistently with the primary QMD retrieval path.
+          // Cap AFTER boosting so boosted-but-recency-ranked memories can surface.
+          // Pass a pre-populated memoryByPath so boostSearchResults skips redundant
+          // disk reads for files already loaded by readAllMemoriesForNamespaces.
+          const recentSorted = activeMemories
             .sort(
               (a, b) =>
                 new Date(b.frontmatter.updated).getTime() -
                 new Date(a.frontmatter.updated).getTime(),
-            )
+            );
+          const preloadedMap = new Map<string, MemoryFile>(
+            activeMemories.filter((m) => m.path).map((m) => [m.path, m]),
+          );
+          const recentAsResults: QmdSearchResult[] = recentSorted.map((m, i) => ({
+            docid: m.frontmatter.id,
+            path: m.path,
+            snippet: m.content,
+            score: 1.0 - i / Math.max(recentSorted.length, 1),
+          }));
+          const recent = (await this.boostSearchResults(recentAsResults, recallNamespaces, prompt, preloadedMap))
+            .sort((a, b) => b.score - a.score)
             .slice(0, recallResultLimit);
 
           // Track access for these memories
-          const memoryIds = recent.map((m) => m.frontmatter.id);
+          const memoryIds = recent.map((r) => r.docid).filter(Boolean);
           this.trackMemoryAccess(memoryIds);
 
           if (sessionKey) {
@@ -1210,10 +1238,7 @@ export class Orchestrator {
               .catch((err) => log.debug(`last recall record failed: ${err}`));
           }
 
-          const lines = recent.map(
-            (m) => `- [${m.frontmatter.category}] ${m.content}`,
-          );
-          sections.push(`## Recent Memories\n\n${lines.join("\n")}`);
+          sections.push(this.formatQmdResults("Recent Memories", recent));
         }
       }
 
@@ -1786,7 +1811,12 @@ export class Orchestrator {
           }
 
           for (const chunk of chunkResult.chunks) {
-            await this.indexPersistedMemory(storage, `${parentId}-chunk-${chunk.index}`);
+            const chunkId = `${parentId}-chunk-${chunk.index}`;
+            // Do NOT push chunkId into persistedIds — chunk IDs must not leak
+            // into boxBuilder.onExtraction() or threading.processTurn(), which
+            // only expect canonical parent memory IDs.  Call indexPersistedMemory
+            // directly for embedding-fallback sync of each chunk document.
+            await this.indexPersistedMemory(storage, chunkId);
           }
           if (
             this.config.verbatimArtifactsEnabled &&
@@ -1821,6 +1851,16 @@ export class Orchestrator {
             strength: contradiction.confidence,
             reason: contradiction.reason,
           });
+          // Deindex the superseded memory so stale paths don't remain in
+          // index_time.json / index_tags.json after the incremental update.
+          if (this.config.queryAwareIndexingEnabled && contradiction.supersededPath) {
+            deindexMemory(
+              this.config.memoryDir,
+              contradiction.supersededPath,
+              contradiction.supersededCreated,
+              contradiction.supersededTags,
+            );
+          }
         }
       }
 
@@ -1955,6 +1995,11 @@ export class Orchestrator {
       `persisted: ${facts.length - dedupedCount} facts${dedupSuffix}, ${entities.length} entities, ${questions.length} questions, ${profileUpdates.length} profile updates`,
     );
 
+    // Update temporal + tag indexes (v8.1) — fire-and-forget, fail-open
+    this.updateTemporalTagIndexes(storage, persistedIds).catch((err) =>
+      log.debug(`temporal-index update error (non-fatal): ${err}`),
+    );
+
     // Return the persisted fact IDs for threading
     return persistedIds;
   }
@@ -1965,6 +2010,74 @@ export class Orchestrator {
     const memory = await storage.getMemoryById(memoryId);
     if (!memory) return;
     await this.embeddingFallback.indexFile(memoryId, memory.content, memory.path);
+  }
+
+  /**
+   * Batch-update temporal and tag indexes after extraction (v8.1).
+   * Reads each persisted memory's path + frontmatter and adds them to
+   * state/index_time.json and state/index_tags.json.
+   * Fail-open: any error is logged but does not abort extraction.
+   */
+  private async updateTemporalTagIndexes(
+    storage: StorageManager,
+    persistedIds: string[],
+  ): Promise<void> {
+    if (!this.config.queryAwareIndexingEnabled) return;
+    // Check for missing indexes BEFORE the early-return so first-time enablement
+    // can bootstrap the full corpus even when this extraction turn persisted nothing.
+    const needsFullRebuild = !indexesExist(this.config.memoryDir);
+    if (!needsFullRebuild && persistedIds.length === 0) return;
+    try {
+      // Read the corpus once to avoid N separate full-corpus scans.
+      // On full rebuild with namespaces enabled, span all configured namespaces so
+      // memories written to other namespaces before the index existed are also captured.
+      const allMemories = needsFullRebuild && this.config.namespacesEnabled
+        ? await this.readAllMemoriesForNamespaces(
+            Array.from(new Set<string>([
+              this.config.defaultNamespace,
+              this.config.sharedNamespace,
+              ...this.config.namespacePolicies.map((p) => p.name),
+            ])),
+          )
+        : await storage.readAllMemories();
+
+      // Bootstrap: index only active (non-archived, non-superseded) memories.
+      // Incremental: index only the newly persisted IDs.
+      const isActive = (m: { frontmatter: { status?: string } }) =>
+        !m.frontmatter.status || m.frontmatter.status === "active";
+      const pool = needsFullRebuild
+        ? allMemories.filter(isActive)
+        : (() => {
+            const idSet = new Set(persistedIds);
+            return allMemories.filter((m) => idSet.has(m.frontmatter.id));
+          })();
+
+      const entries: Array<{ path: string; createdAt: string; tags: string[] }> = [];
+      for (const mem of pool) {
+        if (mem.path && mem.frontmatter?.created) {
+          entries.push({
+            path: mem.path,
+            createdAt: mem.frontmatter.created,
+            tags: mem.frontmatter.tags ?? [],
+          });
+        }
+      }
+      if (needsFullRebuild) {
+        // Always write empty indexes on full rebuild — even when the active pool
+        // is empty (e.g. store contains only archived/superseded entries).
+        // This marks bootstrap completion so indexesExist() returns true and
+        // subsequent extractions skip the full-corpus scan.
+        clearIndexes(this.config.memoryDir);
+        if (entries.length > 0) {
+          indexMemoriesBatch(this.config.memoryDir, entries);
+        }
+        log.info(`temporal-index: bootstrapped from ${entries.length} active memories`);
+      } else if (entries.length > 0) {
+        indexMemoriesBatch(this.config.memoryDir, entries);
+      }
+    } catch (err) {
+      log.debug(`temporal-index update failed (non-fatal): ${err}`);
+    }
   }
 
   /** IDs of facts persisted in the last extraction */
@@ -2003,20 +2116,41 @@ export class Orchestrator {
     const profile = await this.storage.readProfile();
     const result = await this.extraction.consolidate(recent, older, profile);
 
+    // Build a lookup map from the already-loaded corpus to avoid repeated
+    // readAllMemories() scans inside getMemoryById for pre-action deindex reads.
+    const memoryLookup = this.config.queryAwareIndexingEnabled
+      ? new Map(allMemories.map((m) => [m.frontmatter.id, m]))
+      : null;
+
     for (const item of result.items) {
       switch (item.action) {
-        case "INVALIDATE":
+        case "INVALIDATE": {
+          // Capture path/frontmatter before invalidation for index cleanup
+          const toInvalidate = this.config.queryAwareIndexingEnabled
+            ? (memoryLookup?.get(item.existingId) ?? null)
+            : null;
           if (await this.storage.invalidateMemory(item.existingId)) {
             invalidated += 1;
             await this.embeddingFallback.removeFromIndex(item.existingId);
+            if (toInvalidate?.path && toInvalidate.frontmatter?.created) {
+              deindexMemory(
+                this.config.memoryDir,
+                toInvalidate.path,
+                toInvalidate.frontmatter.created,
+                toInvalidate.frontmatter.tags ?? [],
+              );
+            }
           }
           break;
+        }
         case "UPDATE":
           if (item.updatedContent) {
             await this.storage.updateMemory(item.existingId, item.updatedContent, {
               lineage: [item.existingId],
             });
             await this.indexPersistedMemory(this.storage, item.existingId);
+            // updateMemory() only changes content/updated/lineage — path, created, and tags
+            // are preserved, so the temporal/tag index entry is already correct; no reindex needed.
           }
           break;
         case "MERGE":
@@ -2026,10 +2160,24 @@ export class Orchestrator {
               lineage: [item.existingId, item.mergeWith],
             });
             await this.indexPersistedMemory(this.storage, item.existingId);
+            // updateMemory() only changes content/updated/supersedes/lineage — path, created, and tags
+            // are preserved, so the temporal/tag index entry for the survivor is already correct.
+            // Capture before invalidation for index cleanup
+            const toMergeInvalidate = this.config.queryAwareIndexingEnabled
+              ? (memoryLookup?.get(item.mergeWith) ?? null)
+              : null;
             if (await this.storage.invalidateMemory(item.mergeWith)) {
               invalidated += 1;
               merged += 1;
               await this.embeddingFallback.removeFromIndex(item.mergeWith);
+              if (toMergeInvalidate?.path && toMergeInvalidate.frontmatter?.created) {
+                deindexMemory(
+                  this.config.memoryDir,
+                  toMergeInvalidate.path,
+                  toMergeInvalidate.frontmatter.created,
+                  toMergeInvalidate.frontmatter.tags ?? [],
+                );
+              }
             }
           }
           break;
@@ -2094,15 +2242,25 @@ export class Orchestrator {
     }
 
     // Clean expired commitments
-    const cleaned = await this.storage.cleanExpiredCommitments(this.config.commitmentDecayDays);
-    if (cleaned > 0) {
-      log.info(`cleaned ${cleaned} expired commitments`);
+    const deletedCommitments = await this.storage.cleanExpiredCommitments(this.config.commitmentDecayDays);
+    if (deletedCommitments.length > 0) {
+      log.info(`cleaned ${deletedCommitments.length} expired commitments`);
+      if (this.config.queryAwareIndexingEnabled) {
+        for (const m of deletedCommitments) {
+          deindexMemory(this.config.memoryDir, m.path, m.frontmatter.created, m.frontmatter.tags ?? []);
+        }
+      }
     }
 
     // Clean memories past their TTL (speculative memories auto-expire)
-    const ttlCleaned = await this.storage.cleanExpiredTTL();
-    if (ttlCleaned > 0) {
-      log.info(`cleaned ${ttlCleaned} TTL-expired memories`);
+    const deletedTTL = await this.storage.cleanExpiredTTL();
+    if (deletedTTL.length > 0) {
+      log.info(`cleaned ${deletedTTL.length} TTL-expired memories`);
+      if (this.config.queryAwareIndexingEnabled) {
+        for (const m of deletedTTL) {
+          deindexMemory(this.config.memoryDir, m.path, m.frontmatter.created, m.frontmatter.tags ?? []);
+        }
+      }
     }
 
     // Fact archival pass (v6.0) — move old, low-importance, rarely-accessed facts to archive/
@@ -2192,6 +2350,14 @@ export class Orchestrator {
           this.contentHashIndex.remove(memory.content);
         }
         await this.embeddingFallback.removeFromIndex(memory.frontmatter.id);
+        if (this.config.queryAwareIndexingEnabled && memory.path && memory.frontmatter?.created) {
+          deindexMemory(
+            this.config.memoryDir,
+            memory.path,
+            memory.frontmatter.created,
+            memory.frontmatter.tags ?? [],
+          );
+        }
         archivedCount++;
       }
     }
@@ -2469,23 +2635,69 @@ export class Orchestrator {
     results: QmdSearchResult[],
     _recallNamespaces: string[],
     prompt?: string,
+    preloadedMemoryMap?: Map<string, MemoryFile>,
   ): Promise<QmdSearchResult[]> {
     if (results.length === 0) return results;
 
     const now = Date.now();
-    // Only read memory files referenced in QMD results (not all 15,000+).
-    const memoryByPath = new Map<string, MemoryFile>();
-    await Promise.all(
-      results.map(async (r) => {
-        if (!r.path || memoryByPath.has(r.path)) return;
-        const mem = await this.storage.readMemoryByPath(r.path);
-        if (mem) memoryByPath.set(r.path, mem);
-      }),
-    );
+    // Seed with any pre-loaded memories (e.g. from the recency fallback path)
+    // to avoid redundant disk reads for files already in memory.
+    const memoryByPath: Map<string, MemoryFile> = preloadedMemoryMap
+      ? new Map(preloadedMemoryMap)
+      : new Map();
+
+    // Determine temporal/tag query params before I/O (pure computation).
+    const resultPaths = new Set(results.map((r) => r.path).filter(Boolean) as string[]);
+    let temporalFromDate: string | null = null;
+    let promptTags: string[] = [];
+    if (this.config.queryAwareIndexingEnabled && prompt) {
+      if (isTemporalQuery(prompt)) {
+        temporalFromDate = recencyWindowFromPrompt(prompt, now);
+      }
+      promptTags = extractTagsFromPrompt(prompt);
+    }
+
+    // Run all file I/O in parallel: memory files not yet preloaded + index files.
+    const [, rawTemporal, rawTags] = await Promise.all([
+      Promise.all(
+        results.map(async (r) => {
+          if (!r.path || memoryByPath.has(r.path)) return;
+          const mem = await this.storage.readMemoryByPath(r.path);
+          if (mem) memoryByPath.set(r.path, mem);
+        }),
+      ),
+      temporalFromDate !== null
+        ? queryByDateRangeAsync(this.config.memoryDir, temporalFromDate)
+        : Promise.resolve<Set<string> | null>(null),
+      promptTags.length > 0
+        ? queryByTagsAsync(this.config.memoryDir, promptTags)
+        : Promise.resolve<Set<string> | null>(null),
+    ]);
 
     const queryIntent = this.config.intentRoutingEnabled && prompt
       ? inferIntentFromText(prompt)
       : null;
+
+    // v8.1: Temporal + Tag prefilter candidate set
+    // Scope to result paths first so cross-namespace paths don't consume the cap.
+    let temporalCandidates: Set<string> | null = null;
+    let tagCandidates: Set<string> | null = null;
+    if (this.config.queryAwareIndexingEnabled && prompt) {
+      const maxCandidates = this.config.queryAwareIndexingMaxCandidates;
+      const capSet = (s: Set<string> | null): Set<string> | null => {
+        if (!s) return null;
+        // Intersect with result paths first so out-of-scope paths don't exhaust the budget
+        const scoped = new Set(Array.from(s).filter((p) => resultPaths.has(p)));
+        if (maxCandidates === 0 || scoped.size <= maxCandidates) return scoped.size > 0 ? scoped : null;
+        return new Set(Array.from(scoped).slice(0, maxCandidates));
+      };
+      if (temporalFromDate !== null) {
+        temporalCandidates = capSet(rawTemporal);
+      }
+      if (promptTags.length > 0) {
+        tagCandidates = capSet(rawTags);
+      }
+    }
 
     // Calculate boosted scores
     const boosted = results.map((r) => {
@@ -2553,6 +2765,17 @@ export class Orchestrator {
           });
           score += compatibility * this.config.intentRoutingBoost;
         }
+
+        // v8.1: Temporal + Tag index boost
+        // Results that match the detected temporal window or tag query get a small additive boost.
+        if (this.config.queryAwareIndexingEnabled && r.path) {
+          if (temporalCandidates?.has(r.path)) {
+            score += 0.08; // Temporal match boost (fixed, non-configurable)
+          }
+          if (tagCandidates?.has(r.path)) {
+            score += 0.06; // Tag match boost
+          }
+        }
       }
 
       return { ...r, score };
@@ -2604,7 +2827,7 @@ export class Orchestrator {
   private async checkForContradiction(
     content: string,
     category: string,
-  ): Promise<{ supersededId: string; confidence: number; reason: string } | null> {
+  ): Promise<{ supersededId: string; confidence: number; reason: string; supersededPath: string; supersededCreated: string; supersededTags: string[] } | null> {
     if (!this.qmd.isAvailable()) return null;
 
     // Search for similar memories
@@ -2658,6 +2881,9 @@ export class Orchestrator {
               supersededId: existingMemory.frontmatter.id,
               confidence: verification.confidence,
               reason: verification.reasoning,
+              supersededPath: existingMemory.path,
+              supersededCreated: existingMemory.frontmatter.created,
+              supersededTags: existingMemory.frontmatter.tags ?? [],
             };
           }
         }
