@@ -27,9 +27,9 @@ test("lifecycle disabled path preserves byte-for-byte retrieval ordering baselin
 
     const orchestrator = new Orchestrator(config) as any;
     const resultSet = [
-      { path: "/tmp/memory/facts/a.md", score: 0.91 },
-      { path: "/tmp/memory/facts/b.md", score: 0.87 },
-      { path: "/tmp/memory/facts/c.md", score: 0.73 },
+      { path: "/tmp/memory/facts/a.md", score: 0.91, docid: "a", snippet: "a" },
+      { path: "/tmp/memory/facts/b.md", score: 0.87, docid: "b", snippet: "b" },
+      { path: "/tmp/memory/facts/c.md", score: 0.73, docid: "c", snippet: "c" },
     ];
 
     const makeMemory = (id: string, lifecycle?: Partial<Record<string, unknown>>) => ({
