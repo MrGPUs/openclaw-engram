@@ -43,6 +43,24 @@ test("mergeProactiveQuestions preserves base questions when cap is zero", () => 
   assert.deepEqual(merged, base);
 });
 
+test("mergeProactiveQuestions reserves question budget for proactive additions under total cap", () => {
+  const base = [
+    { question: "Base Q1", context: "existing", priority: 0.7 },
+    { question: "Base Q2", context: "existing", priority: 0.7 },
+    { question: "Base Q3", context: "existing", priority: 0.7 },
+  ];
+  const proactive = [
+    { question: "Proactive Q1", context: "new", priority: 0.8 },
+    { question: "Proactive Q2", context: "new", priority: 0.6 },
+  ];
+
+  const merged = mergeProactiveQuestions(base, proactive, 2, 3);
+  assert.deepEqual(
+    merged.map((q) => q.question),
+    ["Base Q1", "Proactive Q1", "Proactive Q2"],
+  );
+});
+
 test("generateProactiveQuestions does not call cloud fallback when localLlmFallback is false", async () => {
   const config = parseConfig({
     memoryDir: ".tmp/memory",

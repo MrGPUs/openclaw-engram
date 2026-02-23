@@ -47,31 +47,74 @@ export function mergeProactiveQuestions(
   baseQuestions: ExtractionQuestion[],
   proactiveQuestions: ExtractionQuestion[],
   maxAdditional: number,
+  maxTotalQuestions?: number,
 ): ExtractionQuestion[] {
   const cappedAdditional = Math.max(0, Math.floor(maxAdditional));
+  const totalCap =
+    typeof maxTotalQuestions === "number" ? Math.max(0, Math.floor(maxTotalQuestions)) : undefined;
+  const capOutput = (questions: ExtractionQuestion[]): ExtractionQuestion[] =>
+    typeof totalCap === "number" ? questions.slice(0, totalCap) : questions;
+
   if (cappedAdditional === 0 || proactiveQuestions.length === 0) {
-    return baseQuestions;
+    return capOutput(baseQuestions);
   }
 
-  const merged = [...baseQuestions];
-  const seen = new Set(
+  const normalizedProactive = proactiveQuestions
+    .map((q) => normalizeQuestion(q))
+    .filter((q) => q.question.length > 0);
+  if (normalizedProactive.length === 0) {
+    return capOutput(baseQuestions);
+  }
+
+  const seenBase = new Set(
     baseQuestions
       .map((q) => q.question.trim().toLowerCase())
       .filter((q) => q.length > 0),
   );
+  const proactiveUnique: ExtractionQuestion[] = [];
+  const seenProactive = new Set<string>();
+  for (const question of normalizedProactive) {
+    const key = question.question.toLowerCase();
+    if (seenBase.has(key) || seenProactive.has(key)) continue;
+    seenProactive.add(key);
+    proactiveUnique.push(question);
+  }
+  if (proactiveUnique.length === 0) {
+    return capOutput(baseQuestions);
+  }
 
+  const proactiveTarget = Math.min(cappedAdditional, proactiveUnique.length);
+  const effectiveTotalCap =
+    typeof totalCap === "number" ? totalCap : baseQuestions.length + proactiveTarget;
+  const proactiveBudget = Math.min(proactiveTarget, effectiveTotalCap);
+  const baseBudget = Math.max(0, effectiveTotalCap - proactiveBudget);
+
+  const merged = baseQuestions.slice(0, baseBudget);
+  const seen = new Set(
+    merged
+      .map((q) => q.question.trim().toLowerCase())
+      .filter((q) => q.length > 0),
+  );
   let added = 0;
-  for (const rawQuestion of proactiveQuestions) {
-    if (added >= cappedAdditional) break;
-    const question = normalizeQuestion(rawQuestion);
-    if (!question.question) continue;
+  for (const question of proactiveUnique) {
+    if (added >= proactiveBudget) break;
     const key = question.question.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
     merged.push(question);
     added += 1;
   }
-  return merged;
+  if (merged.length < effectiveTotalCap) {
+    for (const question of baseQuestions.slice(baseBudget)) {
+      if (merged.length >= effectiveTotalCap) break;
+      const key = question.question.trim().toLowerCase();
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      merged.push(question);
+    }
+  }
+
+  return capOutput(merged);
 }
 
 export class ExtractionEngine {
@@ -145,7 +188,12 @@ export class ExtractionEngine {
       if (proactive.length === 0) return base;
       return {
         ...base,
-        questions: mergeProactiveQuestions(base.questions ?? [], proactive, maxAdditional),
+        questions: mergeProactiveQuestions(
+          base.questions ?? [],
+          proactive,
+          maxAdditional,
+          this.config.extractionMaxQuestionsPerRun,
+        ),
       };
     } catch (err) {
       log.debug(`proactive extraction question pass failed (ignored): ${err}`);
