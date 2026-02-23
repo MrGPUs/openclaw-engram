@@ -1672,19 +1672,13 @@ export class Orchestrator {
       memoryResults = memoryResults.slice(0, recallResultLimit);
 
       if (memoryResults.length > 0) {
-        // Track access for these memories
-        const memoryIds = this.extractMemoryIdsFromResults(memoryResults);
-        this.trackMemoryAccess(memoryIds);
-
-        // Record last recall snapshot + impression log for feedback loops.
-        if (sessionKey) {
-          const unique = Array.from(new Set(memoryIds)).slice(0, 40);
-          this.lastRecall
-            .record({ sessionKey, query: retrievalQuery, memoryIds: unique })
-            .catch((err) => log.debug(`last recall record failed: ${err}`));
-        }
-
-        sections.push(this.formatQmdResults("Relevant Memories", memoryResults));
+        this.publishRecallResults({
+          title: "Relevant Memories",
+          results: memoryResults,
+          sections,
+          retrievalQuery,
+          sessionKey,
+        });
       } else {
         const embeddingResults = await this.searchEmbeddingFallback(retrievalQuery, embeddingFetchLimit);
         const scopedCandidates = filterRecallCandidates(embeddingResults, {
@@ -1698,15 +1692,13 @@ export class Orchestrator {
           recallResultLimit,
         );
         if (scoped.length > 0) {
-          const memoryIds = this.extractMemoryIdsFromResults(scoped);
-          this.trackMemoryAccess(memoryIds);
-          if (sessionKey) {
-            const unique = Array.from(new Set(memoryIds)).slice(0, 40);
-            this.lastRecall
-              .record({ sessionKey, query: retrievalQuery, memoryIds: unique })
-              .catch((err) => log.debug(`last recall record failed: ${err}`));
-          }
-          sections.push(this.formatQmdResults("Relevant Memories", scoped));
+          this.publishRecallResults({
+            title: "Relevant Memories",
+            results: scoped,
+            sections,
+            retrievalQuery,
+            sessionKey,
+          });
         } else {
           const longTerm = await this.applyColdFallbackPipeline({
             prompt: retrievalQuery,
@@ -1714,15 +1706,13 @@ export class Orchestrator {
             recallResultLimit,
           });
           if (longTerm.length > 0) {
-            const memoryIds = this.extractMemoryIdsFromResults(longTerm);
-            this.trackMemoryAccess(memoryIds);
-            if (sessionKey) {
-              const unique = Array.from(new Set(memoryIds)).slice(0, 40);
-              this.lastRecall
-                .record({ sessionKey, query: retrievalQuery, memoryIds: unique })
-                .catch((err) => log.debug(`last recall record failed: ${err}`));
-            }
-            sections.push(this.formatQmdResults("Long-Term Memories (Fallback)", longTerm));
+            this.publishRecallResults({
+              title: "Long-Term Memories (Fallback)",
+              results: longTerm,
+              sections,
+              retrievalQuery,
+              sessionKey,
+            });
           }
         }
       }
@@ -1766,15 +1756,13 @@ export class Orchestrator {
         retrievalQuery,
       )).slice(0, recallResultLimit);
       if (scoped.length > 0) {
-        const memoryIds = this.extractMemoryIdsFromResults(scoped);
-        this.trackMemoryAccess(memoryIds);
-        if (sessionKey) {
-          const unique = Array.from(new Set(memoryIds)).slice(0, 40);
-          this.lastRecall
-            .record({ sessionKey, query: retrievalQuery, memoryIds: unique })
-            .catch((err) => log.debug(`last recall record failed: ${err}`));
-        }
-        sections.push(this.formatQmdResults("Relevant Memories", scoped));
+        this.publishRecallResults({
+          title: "Relevant Memories",
+          results: scoped,
+          sections,
+          retrievalQuery,
+          sessionKey,
+        });
       } else {
         const memories = await this.readAllMemoriesForNamespaces(recallNamespaces);
         if (memories.length > 0) {
@@ -1812,19 +1800,14 @@ export class Orchestrator {
             .sort((a, b) => b.score - a.score)
             .slice(0, recallResultLimit);
 
-          // Track access for these memories
-          const memoryIds = recent.map((r) => r.docid).filter(Boolean);
-          this.trackMemoryAccess(memoryIds);
-
-          if (sessionKey) {
-            const unique = Array.from(new Set(memoryIds)).slice(0, 40);
-            this.lastRecall
-              .record({ sessionKey, query: retrievalQuery, memoryIds: unique })
-              .catch((err) => log.debug(`last recall record failed: ${err}`));
-          }
-
           if (recent.length > 0) {
-            sections.push(this.formatQmdResults("Recent Memories", recent));
+            this.publishRecallResults({
+              title: "Recent Memories",
+              results: recent,
+              sections,
+              retrievalQuery,
+              sessionKey,
+            });
           } else {
             const longTerm = await this.applyColdFallbackPipeline({
               prompt: retrievalQuery,
@@ -1832,15 +1815,13 @@ export class Orchestrator {
               recallResultLimit,
             });
             if (longTerm.length > 0) {
-              const memoryIds = this.extractMemoryIdsFromResults(longTerm);
-              this.trackMemoryAccess(memoryIds);
-              if (sessionKey) {
-                const unique = Array.from(new Set(memoryIds)).slice(0, 40);
-                this.lastRecall
-                  .record({ sessionKey, query: retrievalQuery, memoryIds: unique })
-                  .catch((err) => log.debug(`last recall record failed: ${err}`));
-              }
-              sections.push(this.formatQmdResults("Long-Term Memories (Fallback)", longTerm));
+              this.publishRecallResults({
+                title: "Long-Term Memories (Fallback)",
+                results: longTerm,
+                sections,
+                retrievalQuery,
+                sessionKey,
+              });
             }
           }
         } else {
@@ -1850,15 +1831,13 @@ export class Orchestrator {
             recallResultLimit,
           });
           if (longTerm.length > 0) {
-            const memoryIds = this.extractMemoryIdsFromResults(longTerm);
-            this.trackMemoryAccess(memoryIds);
-            if (sessionKey) {
-              const unique = Array.from(new Set(memoryIds)).slice(0, 40);
-              this.lastRecall
-                .record({ sessionKey, query: retrievalQuery, memoryIds: unique })
-                .catch((err) => log.debug(`last recall record failed: ${err}`));
-            }
-            sections.push(this.formatQmdResults("Long-Term Memories (Fallback)", longTerm));
+            this.publishRecallResults({
+              title: "Long-Term Memories (Fallback)",
+              results: longTerm,
+              sections,
+              retrievalQuery,
+              sessionKey,
+            });
           }
         }
       }
@@ -3483,6 +3462,26 @@ export class Orchestrator {
       return `[${i + 1}] ${r.path} (score: ${r.score.toFixed(3)})\n${snippet}`;
     });
     return `## ${title}\n\n${lines.join("\n\n")}`;
+  }
+
+  private publishRecallResults(options: {
+    title: string;
+    results: QmdSearchResult[];
+    sections: string[];
+    retrievalQuery: string;
+    sessionKey: string | undefined;
+  }): void {
+    const memoryIds = this.extractMemoryIdsFromResults(options.results);
+    this.trackMemoryAccess(memoryIds);
+
+    if (options.sessionKey) {
+      const unique = Array.from(new Set(memoryIds)).slice(0, 40);
+      this.lastRecall
+        .record({ sessionKey: options.sessionKey, query: options.retrievalQuery, memoryIds: unique })
+        .catch((err) => log.debug(`last recall record failed: ${err}`));
+    }
+
+    options.sections.push(this.formatQmdResults(options.title, options.results));
   }
 
   private async searchEmbeddingFallback(query: string, limit: number): Promise<QmdSearchResult[]> {
