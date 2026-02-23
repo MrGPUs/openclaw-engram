@@ -85,6 +85,22 @@ function stripFilesystemLikePaths(text: string): string {
     .replace(/(?:^|\s)([A-Za-z]:\\[^\s)]+)(?=\s|$)/g, " ");
 }
 
+function isBulletOrNumberedLine(line: string): boolean {
+  if (line.startsWith("-") || line.startsWith("*")) {
+    return true;
+  }
+
+  let i = 0;
+  while (i < line.length) {
+    const code = line.charCodeAt(i);
+    if (code < 48 || code > 57) {
+      break;
+    }
+    i += 1;
+  }
+  return i > 0 && i < line.length && line.charAt(i) === ".";
+}
+
 function scoreInstructionHeavyShape(prompt: string): number {
   const lines = prompt
     .split(/\r?\n/)
@@ -99,7 +115,7 @@ function scoreInstructionHeavyShape(prompt: string): number {
         line,
       ) || /^[A-Z][A-Z\s/-]{4,}:$/.test(line),
   ).length;
-  const bulletLineCount = lines.filter((line) => /^[-*]|\d+\./.test(line)).length;
+  const bulletLineCount = lines.filter((line) => isBulletOrNumberedLine(line)).length;
   const longLineCount = lines.filter((line) => line.length >= 180).length;
   const hasPathDensity =
     (prompt.match(/(?:~\/|\/Users\/|[A-Za-z]:\\)/g)?.length ?? 0) >= 2;
@@ -168,7 +184,7 @@ export function buildRecallQueryPolicy(
   if (!cfg.cronRecallPolicyEnabled || !isCron) {
     return {
       promptShape: "standard",
-      retrievalQuery: normalizedPrompt,
+      retrievalQuery: prompt,
       skipConversationRecall: false,
       retrievalBudgetMode: "full",
     };

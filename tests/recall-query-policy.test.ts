@@ -84,11 +84,25 @@ Return your summary as plain text.
 });
 
 test("buildRecallQueryPolicy keeps standard non-cron prompts full", () => {
-  const prompt = "Can you remind me what we decided last week about API retries?";
+  const prompt = "Can you   remind me\nwhat we decided last week about API retries?  ";
   const result = buildRecallQueryPolicy(
     prompt,
     "agent:generalist:main",
     baseConfig,
+  );
+
+  assert.equal(result.promptShape, "standard");
+  assert.equal(result.skipConversationRecall, false);
+  assert.equal(result.retrievalBudgetMode, "full");
+  assert.equal(result.retrievalQuery, prompt);
+});
+
+test("buildRecallQueryPolicy keeps raw prompt when cron policy is disabled", () => {
+  const prompt = "  Keep   this\nas-is for recall query. ";
+  const result = buildRecallQueryPolicy(
+    prompt,
+    "agent:generalist:cron:deckard-morning-briefing",
+    { ...baseConfig, cronRecallPolicyEnabled: false },
   );
 
   assert.equal(result.promptShape, "standard");
