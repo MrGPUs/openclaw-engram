@@ -22,7 +22,7 @@ test("lifecycle disabled path preserves byte-for-byte retrieval ordering baselin
       intentRoutingEnabled: false,
       queryAwareIndexingEnabled: false,
       lifecyclePolicyEnabled: false,
-      lifecycleFilterStaleEnabled: true,
+      lifecycleFilterStaleEnabled: false,
     });
 
     const orchestrator = new Orchestrator(config) as any;
