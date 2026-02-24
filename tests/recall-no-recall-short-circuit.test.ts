@@ -34,6 +34,7 @@ function baseConfig(memoryDir: string): PluginConfig {
     accessTrackingBufferMaxSize: 100,
     recencyWeight: 0.2,
     boostAccessCount: true,
+    recordEmptyRecallImpressions: false,
     queryExpansionEnabled: false,
     queryExpansionMaxQueries: 4,
     queryExpansionMinTokenLen: 3,
@@ -278,7 +279,8 @@ test("qmd fetch tops up when artifact-heavy window underfills non-artifact budge
   const cfg = baseConfig(memoryDir);
   const orchestrator = new Orchestrator(cfg);
 
-  const qmdCalls: number[] = [];
+  const qmdSearchCalls: number[] = [];
+  const qmdHybridCalls: number[] = [];
   const mkResult = (path: string, score: number) => ({
     docid: path,
     path,
@@ -287,8 +289,8 @@ test("qmd fetch tops up when artifact-heavy window underfills non-artifact budge
   });
 
   (orchestrator as any).qmd = {
-    hybridSearch: async (_query: string, _collection: any, maxResults: number) => {
-      qmdCalls.push(maxResults);
+    search: async (_query: string, _collection: any, maxResults: number) => {
+      qmdSearchCalls.push(maxResults);
       if (maxResults <= 8) {
         return Array.from({ length: maxResults }, (_, i) =>
           mkResult(`/tmp/memory/artifacts/${String.fromCharCode(97 + i)}.md`, 1 - i * 0.001),
@@ -303,6 +305,10 @@ test("qmd fetch tops up when artifact-heavy window underfills non-artifact budge
         mkResult("/tmp/memory/facts/3.md", 0.95),
       ];
     },
+    hybridSearch: async (_query: string, _collection: any, maxResults: number) => {
+      qmdHybridCalls.push(maxResults);
+      return [];
+    },
   };
 
   const results = await (orchestrator as any).fetchQmdMemoryResultsWithArtifactTopUp("topic", 3, 8, {
@@ -312,7 +318,8 @@ test("qmd fetch tops up when artifact-heavy window underfills non-artifact budge
   });
   assert.equal(results.length, 3);
   assert.equal(results.every((r: any) => !r.path.includes("/artifacts/")), true);
-  assert.equal(qmdCalls.length >= 2, true);
+  assert.equal(qmdSearchCalls.length >= 2, true);
+  assert.equal(qmdHybridCalls.length, 0);
 });
 
 test("qmd top-up returns best partial results after bounded attempts", async () => {
@@ -321,7 +328,8 @@ test("qmd top-up returns best partial results after bounded attempts", async () 
   const cfg = baseConfig(memoryDir);
   const orchestrator = new Orchestrator(cfg);
 
-  const qmdCalls: number[] = [];
+  const qmdSearchCalls: number[] = [];
+  const qmdHybridCalls: number[] = [];
   const mkResult = (path: string, score: number) => ({
     docid: path,
     path,
@@ -330,12 +338,16 @@ test("qmd top-up returns best partial results after bounded attempts", async () 
   });
 
   (orchestrator as any).qmd = {
-    hybridSearch: async (_query: string, _collection: any, maxResults: number) => {
-      qmdCalls.push(maxResults);
+    search: async (_query: string, _collection: any, maxResults: number) => {
+      qmdSearchCalls.push(maxResults);
       const artifacts = Array.from({ length: maxResults }, (_, i) =>
         mkResult(`/tmp/memory/artifacts/${i + 1}.md`, 1 - i * 0.0001),
       );
       return [...artifacts, mkResult("/tmp/memory/facts/partial.md", 0.25)];
+    },
+    hybridSearch: async (_query: string, _collection: any, maxResults: number) => {
+      qmdHybridCalls.push(maxResults);
+      return [];
     },
   };
 
@@ -346,7 +358,8 @@ test("qmd top-up returns best partial results after bounded attempts", async () 
   });
   assert.equal(results.length, 1);
   assert.equal(results[0]?.path, "/tmp/memory/facts/partial.md");
-  assert.equal(qmdCalls.length, 4);
+  assert.equal(qmdSearchCalls.length, 2);
+  assert.equal(qmdHybridCalls.length, 0);
 });
 
 test("qmd top-up applies namespace filtering before cap", async () => {
@@ -363,7 +376,7 @@ test("qmd top-up applies namespace filtering before cap", async () => {
   });
 
   (orchestrator as any).qmd = {
-    hybridSearch: async (_query: string, _collection: any, maxResults: number) => {
+    search: async (_query: string, _collection: any, maxResults: number) => {
       if (maxResults <= 8) {
         return [
           mkResult("/tmp/memory/other/facts/a.md", 1.0),
@@ -384,6 +397,9 @@ test("qmd top-up applies namespace filtering before cap", async () => {
         mkResult("/tmp/memory/default/facts/2.md", 0.96),
         mkResult("/tmp/memory/default/facts/3.md", 0.95),
       ];
+    },
+    hybridSearch: async (_query: string, _collection: any, maxResults: number) => {
+      return [];
     },
   };
 
@@ -600,6 +616,59 @@ test("cold fallback remains eligible when lifecycle stale filtering is enabled",
   const context = await (orchestrator as any).recallInternal("Any shard migration edge cases?", undefined);
   assert.match(context, /Long-Term Memories \(Fallback\)/);
   assert.match(context, /shard migration edge cases/i);
+});
+
+test("recall does not record empty impression when no memories are injected by default", async () => {
+  const memoryDir = tmpDir("engram-empty-impression");
+  await mkdir(memoryDir, { recursive: true });
+
+  const cfg = baseConfig(memoryDir);
+  cfg.recallPlannerEnabled = false;
+  cfg.qmdEnabled = false;
+  const orchestrator = new Orchestrator(cfg);
+
+  let recorded: Array<{ sessionKey: string; memoryIds: string[] }> = [];
+  (orchestrator as any).lastRecall = {
+    record: async (payload: { sessionKey: string; memoryIds: string[] }) => {
+      recorded.push(payload);
+    },
+  };
+
+  const context = await (orchestrator as any).recallInternal(
+    "Please remember our QMD diagnostics.",
+    "session-empty-impression",
+  );
+
+  assert.equal(context.includes("## Relevant Memories"), false);
+  assert.equal(recorded.length, 0);
+});
+
+test("recall records empty impression when explicitly enabled", async () => {
+  const memoryDir = tmpDir("engram-empty-impression-enabled");
+  await mkdir(memoryDir, { recursive: true });
+
+  const cfg = baseConfig(memoryDir);
+  cfg.recallPlannerEnabled = false;
+  cfg.qmdEnabled = false;
+  cfg.recordEmptyRecallImpressions = true;
+  const orchestrator = new Orchestrator(cfg);
+
+  let recorded: Array<{ sessionKey: string; memoryIds: string[] }> = [];
+  (orchestrator as any).lastRecall = {
+    record: async (payload: { sessionKey: string; memoryIds: string[] }) => {
+      recorded.push(payload);
+    },
+  };
+
+  const context = await (orchestrator as any).recallInternal(
+    "Please remember our QMD diagnostics.",
+    "session-empty-impression",
+  );
+
+  assert.equal(context.includes("## Relevant Memories"), false);
+  assert.equal(recorded.length, 1);
+  assert.equal(recorded[0]?.sessionKey, "session-empty-impression");
+  assert.deepEqual(recorded[0]?.memoryIds, []);
 });
 
 test("cold fallback uses configured cold QMD collection before archive scan", async () => {

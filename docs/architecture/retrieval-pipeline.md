@@ -76,7 +76,7 @@ Config: `recallPlannerEnabled` (default `true`).
 
 ## QMD Hybrid Search
 
-Recall uses `QmdClient.hybridSearch()`, which runs BM25 and vector searches as parallel subprocess calls and merges results. The MCP daemon (`qmdDaemonEnabled`) is used in background operations (consolidation, dedup) but not in the primary recall path.
+Recall uses `QmdClient.search()` first (daemon-preferred when available) and supplements underfilled results with `QmdClient.hybridSearch()` (BM25 + vector merge). This keeps recall fail-open while reducing subprocess contention under load.
 
 - `qmdCollection` specifies which QMD collection to search.
 - `qmdMaxResults` caps the number of candidates returned.

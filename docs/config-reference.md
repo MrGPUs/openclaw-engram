@@ -47,11 +47,12 @@ All settings live in `openclaw.json` under `plugins.entries.openclaw-engram.conf
 | `qmdCollection` | `openclaw-engram` | QMD collection name |
 | `qmdMaxResults` | `8` | Final result cap after over-scanning and ranking (fetch size may be larger) |
 | `qmdPath` | `(auto)` | Absolute path to `qmd` binary (bypasses PATH) |
-| `qmdDaemonEnabled` | `true` | Use QMD MCP daemon for background operations (consolidation, dedup); primary recall always uses subprocess `hybridSearch()` |
+| `qmdDaemonEnabled` | `true` | Prefer QMD MCP daemon for recall/search when available (lower contention); fail-open to subprocess search/hybrid paths |
 | `qmdDaemonUrl` | `http://localhost:8181/mcp` | QMD daemon MCP endpoint URL |
 | `qmdDaemonRecheckIntervalMs` | `60000` | Interval to re-probe daemon availability after failure |
 | `embeddingFallbackEnabled` | `true` | Use embedding search when QMD is unavailable |
 | `embeddingFallbackProvider` | `auto` | `auto`, `openai`, or `local` — selects embedding API for fallback |
+| `recordEmptyRecallImpressions` | `false` | If `true`, write recall impression rows with empty `memoryIds` when no memory context is injected |
 | `knowledgeIndexEnabled` | `true` | Inject entity/topic index into recall context |
 | `knowledgeIndexMaxEntities` | `40` | Max entities included in the knowledge index |
 | `knowledgeIndexMaxChars` | `4000` | Max characters of knowledge index injected |
@@ -228,6 +229,22 @@ See [compounding.md](compounding.md).
 | `factArchivalMaxImportance` | `0.3` | Maximum importance to archive |
 | `factArchivalMaxAccessCount` | `2` | Maximum access count to archive |
 | `factArchivalProtectedCategories` | `["commitment","preference","decision","principle"]` | Never archived |
+
+## v8.2 Graph Recall Activation
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `multiGraphMemoryEnabled` | `false` | Enable graph storage/traversal substrate |
+| `graphRecallEnabled` | `false` | Enable planner `graph_mode` expansion |
+| `graphExpandedIntentEnabled` | `true` | Escalate broader causal/timeline prompts into `graph_mode` |
+| `graphAssistInFullModeEnabled` | `true` | Run bounded graph expansion during `full` recall mode |
+| `graphAssistMinSeedResults` | `3` | Minimum seed recalls required for full-mode graph assist |
+| `graphWriteSessionAdjacencyEnabled` | `true` | Write fallback time edges between consecutive extracted memories |
+| `entityGraphEnabled` | `true` | Enable entity co-reference edges |
+| `timeGraphEnabled` | `true` | Enable temporal sequence edges |
+| `causalGraphEnabled` | `true` | Enable causal phrase edges |
+| `maxGraphTraversalSteps` | `3` | Max spreading-activation BFS hops |
+| `graphActivationDecay` | `0.7` | Per-hop decay factor |
 
 ## File Hygiene
 

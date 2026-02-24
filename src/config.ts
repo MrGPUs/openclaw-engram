@@ -230,6 +230,7 @@ export function parseConfig(raw: unknown): PluginConfig {
     recencyWeight:
       typeof cfg.recencyWeight === "number" ? cfg.recencyWeight : 0.2,
     boostAccessCount: cfg.boostAccessCount !== false,
+    recordEmptyRecallImpressions: cfg.recordEmptyRecallImpressions === true,
     // v2.2 Advanced Retrieval (safe defaults: off unless enabled)
     queryExpansionEnabled: cfg.queryExpansionEnabled === true,
     queryExpansionMaxQueries:
@@ -635,8 +636,15 @@ export function parseConfig(raw: unknown): PluginConfig {
     // v8.2: Multi-graph memory (PR 18)
     multiGraphMemoryEnabled: cfg.multiGraphMemoryEnabled === true,
     graphRecallEnabled: cfg.graphRecallEnabled === true,
+    graphExpandedIntentEnabled: cfg.graphExpandedIntentEnabled !== false,
+    graphAssistInFullModeEnabled: cfg.graphAssistInFullModeEnabled !== false,
+    graphAssistMinSeedResults:
+      typeof cfg.graphAssistMinSeedResults === "number"
+        ? Math.max(1, Math.floor(cfg.graphAssistMinSeedResults))
+        : 3,
     entityGraphEnabled: cfg.entityGraphEnabled !== false,
     timeGraphEnabled: cfg.timeGraphEnabled !== false,
+    graphWriteSessionAdjacencyEnabled: cfg.graphWriteSessionAdjacencyEnabled !== false,
     causalGraphEnabled: cfg.causalGraphEnabled !== false,
     maxGraphTraversalSteps:
       typeof cfg.maxGraphTraversalSteps === "number" ? Math.max(0, cfg.maxGraphTraversalSteps) : 3,

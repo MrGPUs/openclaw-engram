@@ -76,6 +76,8 @@ export interface PluginConfig {
   // Retrieval options
   recencyWeight: number;
   boostAccessCount: boolean;
+  /** Record empty recall impressions (memoryIds: []) when no memories are injected. Disabled by default. */
+  recordEmptyRecallImpressions: boolean;
   // v2.2 Advanced Retrieval
   queryExpansionEnabled: boolean;
   queryExpansionMaxQueries: number;
@@ -318,8 +320,16 @@ export interface PluginConfig {
   multiGraphMemoryEnabled: boolean;
   // v8.2 PR 19A: graph recall planner gating
   graphRecallEnabled: boolean;
+  /** Allow graph_mode escalation for broader causal/timeline phrasing beyond strict keywords. */
+  graphExpandedIntentEnabled?: boolean;
+  /** Run bounded graph expansion in full mode when enough recall seeds exist. */
+  graphAssistInFullModeEnabled?: boolean;
+  /** Minimum seed results required before full-mode graph assist runs. */
+  graphAssistMinSeedResults?: number;
   entityGraphEnabled: boolean;
   timeGraphEnabled: boolean;
+  /** When true, write fallback temporal adjacency edges for consecutive extracted memories. */
+  graphWriteSessionAdjacencyEnabled?: boolean;
   causalGraphEnabled: boolean;
   maxGraphTraversalSteps: number;
   graphActivationDecay: number;
@@ -674,7 +684,30 @@ export interface LlmTraceEvent {
   tokenUsage?: { input?: number; output?: number; total?: number };
 }
 
-export type LlmTraceCallback = (event: LlmTraceEvent) => void;
+export interface RecallTraceEvent {
+  kind: "recall_summary";
+  traceId: string;
+  operation: "recall";
+  sessionKey?: string;
+  promptHash: string;
+  promptLength: number;
+  retrievalQueryHash: string;
+  retrievalQueryLength: number;
+  recallMode: RecallPlanMode;
+  recallResultLimit: number;
+  qmdEnabled: boolean;
+  qmdAvailable: boolean;
+  recallNamespaces: string[];
+  source: "none" | "hot_qmd" | "hot_embedding" | "cold_fallback" | "recent_scan";
+  recalledMemoryCount: number;
+  injected: boolean;
+  contextChars: number;
+  durationMs: number;
+  timings?: Record<string, string>;
+}
+
+export type EngramTraceEvent = LlmTraceEvent | RecallTraceEvent;
+export type LlmTraceCallback = (event: EngramTraceEvent) => void;
 
 // ============================================================================
 // Gateway Configuration Types (for fallback AI)

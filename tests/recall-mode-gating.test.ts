@@ -41,3 +41,14 @@ test("resolveEffectiveRecallMode keeps baseline behavior when planner is disable
   });
   assert.equal(mode, "full");
 });
+
+test("resolveEffectiveRecallMode broad intent can escalate to graph_mode when enabled", () => {
+  const mode = resolveEffectiveRecallMode({
+    plannerEnabled: true,
+    graphRecallEnabled: true,
+    multiGraphMemoryEnabled: true,
+    graphExpandedIntentEnabled: true,
+    prompt: "How did we get here with recall regressions?",
+  });
+  assert.equal(mode, "graph_mode");
+});
