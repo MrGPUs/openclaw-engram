@@ -34,6 +34,7 @@ function baseConfig(memoryDir: string): PluginConfig {
     accessTrackingBufferMaxSize: 100,
     recencyWeight: 0.2,
     boostAccessCount: true,
+    recordEmptyRecallImpressions: false,
     queryExpansionEnabled: false,
     queryExpansionMaxQueries: 4,
     queryExpansionMinTokenLen: 3,

@@ -88,6 +88,7 @@ test("recallInternal writes graph recall snapshot in graph_mode", async () => {
         score: 0.9,
       },
     ],
+    search: async () => [],
   };
   (orchestrator as any).expandResultsViaGraph = async ({ memoryResults }: any) => ({
     merged: [
@@ -116,6 +117,75 @@ test("recallInternal writes graph recall snapshot in graph_mode", async () => {
     expandedCount: number;
   };
   assert.equal(snapshot.mode, "graph_mode");
+  assert.equal(snapshot.seedCount, 1);
+  assert.equal(snapshot.expandedCount, 1);
+});
+
+test("recallInternal runs bounded graph assist in full mode when enabled", async () => {
+  const memoryDir = await mkdtemp(path.join(os.tmpdir(), "engram-graph-assist-full-"));
+  const cfg = parseConfig({
+    openaiApiKey: "sk-test",
+    memoryDir,
+    workspaceDir: path.join(memoryDir, "workspace"),
+    qmdEnabled: true,
+    qmdCollection: "engram-test",
+    qmdMaxResults: 3,
+    recallPlannerEnabled: true,
+    graphRecallEnabled: true,
+    multiGraphMemoryEnabled: true,
+    graphAssistInFullModeEnabled: true,
+    graphAssistMinSeedResults: 1,
+    verbatimArtifactsEnabled: false,
+  });
+  const orchestrator = new Orchestrator(cfg);
+
+  const seedId = await orchestrator.storage.writeMemory("fact", "seed memory for full mode assist");
+  const seedMemory = await orchestrator.storage.getMemoryById(seedId);
+  assert.ok(seedMemory);
+
+  const expandedId = await orchestrator.storage.writeMemory("fact", "expanded memory for full mode assist");
+  const expandedMemory = await orchestrator.storage.getMemoryById(expandedId);
+  assert.ok(expandedMemory);
+
+  (orchestrator as any).qmd = {
+    isAvailable: () => true,
+    hybridSearch: async () => [
+      {
+        docid: seedMemory!.frontmatter.id,
+        path: seedMemory!.path,
+        snippet: "seed memory for full mode assist",
+        score: 0.9,
+      },
+    ],
+    search: async () => [],
+  };
+  (orchestrator as any).expandResultsViaGraph = async ({ memoryResults }: any) => ({
+    merged: [
+      ...memoryResults,
+      {
+        docid: expandedMemory!.frontmatter.id,
+        path: expandedMemory!.path,
+        snippet: "expanded memory for full mode assist",
+        score: 0.8,
+      },
+    ],
+    seedPaths: [seedMemory!.path],
+    expandedPaths: [{ path: expandedMemory!.path, score: 0.8, namespace: "default" }],
+  });
+
+  const out = await (orchestrator as any).recallInternal(
+    "Summarize our latest engram status.",
+    "session-graph-full-assist",
+  );
+  assert.match(out, /Relevant Memories/);
+
+  const raw = await readFile(path.join(memoryDir, "state", "last_graph_recall.json"), "utf-8");
+  const snapshot = JSON.parse(raw) as {
+    mode: string;
+    seedCount: number;
+    expandedCount: number;
+  };
+  assert.equal(snapshot.mode, "full");
   assert.equal(snapshot.seedCount, 1);
   assert.equal(snapshot.expandedCount, 1);
 });

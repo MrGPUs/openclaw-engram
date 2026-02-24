@@ -55,3 +55,36 @@ test("searchGlobal falls back to subprocess when daemon returns empty results", 
   assert.equal(out.length, 1);
   assert.equal(out[0]?.docid, "fact-2");
 });
+
+test("hybridSearch prefers daemon results when available", async () => {
+  const client = new QmdClient("openclaw-engram", 5) as any;
+  client.available = true;
+  client.daemonAvailable = true;
+  client.daemonSession = {};
+  client.maybeProbeDaemon = async () => {};
+
+  let bm25Calls = 0;
+  let vectorCalls = 0;
+  client.searchViaDaemon = async () => [
+    {
+      docid: "fact-3",
+      path: "/tmp/facts/fact-3.md",
+      snippet: "daemon",
+      score: 0.95,
+    },
+  ];
+  client.bm25Search = async () => {
+    bm25Calls += 1;
+    return [];
+  };
+  client.vectorSearch = async () => {
+    vectorCalls += 1;
+    return [];
+  };
+
+  const out = await client.hybridSearch("query", undefined, 3);
+  assert.equal(out.length, 1);
+  assert.equal(out[0]?.docid, "fact-3");
+  assert.equal(bm25Calls, 0);
+  assert.equal(vectorCalls, 0);
+});

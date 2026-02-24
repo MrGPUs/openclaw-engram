@@ -23,7 +23,12 @@ import { isDisagreementPrompt } from "./signal.js";
 import { lintWorkspaceFiles, rotateMarkdownFileToArchive } from "./hygiene.js";
 import { EmbeddingFallback } from "./embedding-fallback.js";
 import { BootstrapEngine } from "./bootstrap.js";
-import { inferIntentFromText, intentCompatibilityScore, planRecallMode } from "./intent.js";
+import {
+  hasBroadGraphIntent,
+  inferIntentFromText,
+  intentCompatibilityScore,
+  planRecallMode,
+} from "./intent.js";
 import { buildRecallQueryPolicy } from "./recall-query-policy.js";
 import { BoxBuilder, type BoxFrontmatter } from "./boxes.js";
 import { classifyMemoryKind } from "./himem.js";
@@ -58,6 +63,7 @@ import type {
   BootstrapOptions,
   BootstrapResult,
   BufferTurn,
+  EngramTraceEvent,
   ExtractionResult,
   LifecycleState,
   MemoryActionEvent,
@@ -274,11 +280,20 @@ export function resolveEffectiveRecallMode(options: {
   plannerEnabled: boolean;
   graphRecallEnabled: boolean;
   multiGraphMemoryEnabled: boolean;
+  graphExpandedIntentEnabled?: boolean;
   prompt: string;
 }): RecallPlanMode {
-  const plannedMode: RecallPlanMode = options.plannerEnabled
+  let plannedMode: RecallPlanMode = options.plannerEnabled
     ? planRecallMode(options.prompt)
     : "full";
+  if (
+    plannedMode !== "graph_mode" &&
+    options.plannerEnabled &&
+    options.graphExpandedIntentEnabled === true &&
+    hasBroadGraphIntent(options.prompt)
+  ) {
+    plannedMode = "graph_mode";
+  }
   if (
     plannedMode === "graph_mode" &&
     (!options.graphRecallEnabled || !options.multiGraphMemoryEnabled)
@@ -1196,36 +1211,49 @@ export class Orchestrator {
     },
   ): Promise<QmdSearchResult[]> {
     let fetchLimit = Math.max(qmdFetchLimit, qmdHybridFetchLimit);
-    const maxFetchLimit = Math.min(800, Math.max(fetchLimit, qmdFetchLimit * 8));
-    const MAX_ATTEMPTS = 4;
+    const maxFetchLimit = Math.min(320, Math.max(fetchLimit, qmdFetchLimit * 5));
+    const MAX_ATTEMPTS = 2;
+    const QMD_RECALL_BUDGET_MS = 25_000;
+    const startedAtMs = Date.now();
     let bestFiltered: QmdSearchResult[] = [];
-    let queryFallbackAttempted = false;
-
-    const runQueryFallback = async (): Promise<QmdSearchResult[]> => {
-      if (queryFallbackAttempted) return [];
-      queryFallbackAttempted = true;
-      const queryResults = await this.qmd.search(prompt, options.collection, fetchLimit);
-      const filteredQueryResults = filterRecallCandidates(queryResults, {
-        namespacesEnabled: options.namespacesEnabled,
-        recallNamespaces: options.recallNamespaces,
-        resolveNamespace: options.resolveNamespace,
-        limit: fetchLimit,
-      });
-      if (filteredQueryResults.length > 0) {
-        log.debug(
-          `QMD query fallback returned ${filteredQueryResults.length} candidates after hybrid underfilled`,
-        );
-      }
-      return filteredQueryResults;
-    };
 
     for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt += 1) {
-      const memoryResults = await this.qmd.hybridSearch(
+      if (Date.now() - startedAtMs >= QMD_RECALL_BUDGET_MS) {
+        break;
+      }
+
+      const primaryResults = await this.qmd.search(
         prompt,
         options.collection,
         fetchLimit,
       );
-      const filteredResults = filterRecallCandidates(memoryResults, {
+      let mergedResults = primaryResults;
+
+      // Backfill with hybrid results only when primary retrieval underfills.
+      if (
+        primaryResults.length < qmdFetchLimit &&
+        Date.now() - startedAtMs < QMD_RECALL_BUDGET_MS
+      ) {
+        const hybridResults = await this.qmd.hybridSearch(prompt, options.collection, fetchLimit);
+        if (hybridResults.length > 0) {
+          const mergedByPath = new Map<string, QmdSearchResult>();
+          for (const result of [...primaryResults, ...hybridResults]) {
+            const key = result.path || result.docid;
+            const existing = mergedByPath.get(key);
+            if (!existing || result.score > existing.score) {
+              mergedByPath.set(key, {
+                ...result,
+                snippet: result.snippet || existing?.snippet || "",
+              });
+            }
+          }
+          mergedResults = [...mergedByPath.values()]
+            .sort((a, b) => b.score - a.score)
+            .slice(0, fetchLimit);
+        }
+      }
+
+      const filteredResults = filterRecallCandidates(mergedResults, {
         namespacesEnabled: options.namespacesEnabled,
         recallNamespaces: options.recallNamespaces,
         resolveNamespace: options.resolveNamespace,
@@ -1238,14 +1266,10 @@ export class Orchestrator {
       if (filteredResults.length > bestFiltered.length) {
         bestFiltered = filteredResults;
       }
-      if (memoryResults.length === 0) {
-        const queryFallback = await runQueryFallback();
-        if (queryFallback.length > 0) {
-          return queryFallback.slice(0, qmdFetchLimit);
-        }
+      if (mergedResults.length === 0) {
         return filteredResults;
       }
-      if (memoryResults.length < fetchLimit && filteredResults.length > 0) {
+      if (mergedResults.length < fetchLimit && filteredResults.length > 0) {
         return filteredResults;
       }
       if (fetchLimit >= maxFetchLimit) {
@@ -1256,14 +1280,7 @@ export class Orchestrator {
       fetchLimit = Math.min(maxFetchLimit, fetchLimit + growth);
     }
 
-    if (bestFiltered.length === 0) {
-      const queryFallback = await runQueryFallback();
-      if (queryFallback.length > 0) {
-        return queryFallback.slice(0, qmdFetchLimit);
-      }
-    }
-
-    return bestFiltered;
+    return bestFiltered.slice(0, qmdFetchLimit);
   }
 
   private async expandResultsViaGraph(options: {
@@ -1372,6 +1389,7 @@ export class Orchestrator {
   private async recallInternal(prompt: string, sessionKey?: string): Promise<string> {
     const recallStart = Date.now();
     const timings: Record<string, string> = {};
+    const promptHash = createHash("sha256").update(prompt).digest("hex");
     const sections: string[] = [];
     const queryPolicy = buildRecallQueryPolicy(prompt, sessionKey, {
       cronRecallPolicyEnabled: this.config.cronRecallPolicyEnabled,
@@ -1380,11 +1398,16 @@ export class Orchestrator {
       cronConversationRecallMode: this.config.cronConversationRecallMode,
     });
     const retrievalQuery = queryPolicy.retrievalQuery || prompt;
+    const retrievalQueryHash = createHash("sha256").update(retrievalQuery).digest("hex");
+    let impressionRecorded = false;
+    let recallSource: "none" | "hot_qmd" | "hot_embedding" | "cold_fallback" | "recent_scan" = "none";
+    let recalledMemoryCount = 0;
     timings.queryPolicy = `${queryPolicy.promptShape}/${queryPolicy.retrievalBudgetMode}${queryPolicy.skipConversationRecall ? "/skip-conv" : ""}`;
     const recallMode: RecallPlanMode = resolveEffectiveRecallMode({
       plannerEnabled: this.config.recallPlannerEnabled,
       graphRecallEnabled: this.config.graphRecallEnabled,
       multiGraphMemoryEnabled: this.config.multiGraphMemoryEnabled,
+      graphExpandedIntentEnabled: this.config.graphExpandedIntentEnabled === true,
       prompt,
     });
     timings.recallPlan = recallMode;
@@ -1417,6 +1440,30 @@ export class Orchestrator {
 
     if (recallMode === "no_recall") {
       timings.total = `${Date.now() - recallStart}ms`;
+      this.emitTrace({
+        kind: "recall_summary",
+        traceId: createHash("sha256")
+          .update(`${sessionKey ?? "default"}:${Date.now()}:${promptHash}`)
+          .digest("hex")
+          .slice(0, 16),
+        operation: "recall",
+        sessionKey,
+        promptHash,
+        promptLength: prompt.length,
+        retrievalQueryHash,
+        retrievalQueryLength: retrievalQuery.length,
+        recallMode,
+        recallResultLimit,
+        qmdEnabled: this.config.qmdEnabled,
+        qmdAvailable: this.qmd.isAvailable(),
+        recallNamespaces: [],
+        source: recallSource,
+        recalledMemoryCount,
+        injected: false,
+        contextChars: 0,
+        durationMs: Date.now() - recallStart,
+        timings: { ...timings },
+      });
       return "";
     }
 
@@ -1610,7 +1657,12 @@ export class Orchestrator {
       // Artifacts are injected through dedicated verbatim recall flow only.
       memoryResults = memoryResults.filter((r) => !isArtifactMemoryPath(r.path));
 
-      if (recallMode === "graph_mode") {
+      const shouldRunGraphExpansion =
+        recallMode === "graph_mode" ||
+        (this.config.graphAssistInFullModeEnabled !== false &&
+          recallMode === "full" &&
+          memoryResults.length >= Math.max(1, this.config.graphAssistMinSeedResults ?? 3));
+      if (shouldRunGraphExpansion) {
         const {
           merged,
           seedPaths,
@@ -1672,6 +1724,8 @@ export class Orchestrator {
       memoryResults = memoryResults.slice(0, recallResultLimit);
 
       if (memoryResults.length > 0) {
+        recallSource = "hot_qmd";
+        recalledMemoryCount = memoryResults.length;
         this.publishRecallResults({
           title: "Relevant Memories",
           results: memoryResults,
@@ -1679,6 +1733,7 @@ export class Orchestrator {
           retrievalQuery,
           sessionKey,
         });
+        impressionRecorded = true;
       } else {
         const embeddingResults = await this.searchEmbeddingFallback(retrievalQuery, embeddingFetchLimit);
         const scopedCandidates = filterRecallCandidates(embeddingResults, {
@@ -1692,6 +1747,8 @@ export class Orchestrator {
           recallResultLimit,
         );
         if (scoped.length > 0) {
+          recallSource = "hot_embedding";
+          recalledMemoryCount = scoped.length;
           this.publishRecallResults({
             title: "Relevant Memories",
             results: scoped,
@@ -1699,6 +1756,7 @@ export class Orchestrator {
             retrievalQuery,
             sessionKey,
           });
+          impressionRecorded = true;
         } else {
           const longTerm = await this.applyColdFallbackPipeline({
             prompt: retrievalQuery,
@@ -1706,6 +1764,8 @@ export class Orchestrator {
             recallResultLimit,
           });
           if (longTerm.length > 0) {
+            recallSource = "cold_fallback";
+            recalledMemoryCount = longTerm.length;
             this.publishRecallResults({
               title: "Long-Term Memories (Fallback)",
               results: longTerm,
@@ -1713,6 +1773,7 @@ export class Orchestrator {
               retrievalQuery,
               sessionKey,
             });
+            impressionRecorded = true;
           }
         }
       }
@@ -1756,6 +1817,8 @@ export class Orchestrator {
         retrievalQuery,
       )).slice(0, recallResultLimit);
       if (scoped.length > 0) {
+        recallSource = "hot_embedding";
+        recalledMemoryCount = scoped.length;
         this.publishRecallResults({
           title: "Relevant Memories",
           results: scoped,
@@ -1763,6 +1826,7 @@ export class Orchestrator {
           retrievalQuery,
           sessionKey,
         });
+        impressionRecorded = true;
       } else {
         const memories = await this.readAllMemoriesForNamespaces(recallNamespaces);
         if (memories.length > 0) {
@@ -1801,6 +1865,8 @@ export class Orchestrator {
             .slice(0, recallResultLimit);
 
           if (recent.length > 0) {
+            recallSource = "recent_scan";
+            recalledMemoryCount = recent.length;
             this.publishRecallResults({
               title: "Recent Memories",
               results: recent,
@@ -1808,6 +1874,7 @@ export class Orchestrator {
               retrievalQuery,
               sessionKey,
             });
+            impressionRecorded = true;
           } else {
             const longTerm = await this.applyColdFallbackPipeline({
               prompt: retrievalQuery,
@@ -1815,6 +1882,8 @@ export class Orchestrator {
               recallResultLimit,
             });
             if (longTerm.length > 0) {
+              recallSource = "cold_fallback";
+              recalledMemoryCount = longTerm.length;
               this.publishRecallResults({
                 title: "Long-Term Memories (Fallback)",
                 results: longTerm,
@@ -1822,6 +1891,7 @@ export class Orchestrator {
                 retrievalQuery,
                 sessionKey,
               });
+              impressionRecorded = true;
             }
           }
         } else {
@@ -1831,6 +1901,8 @@ export class Orchestrator {
             recallResultLimit,
           });
           if (longTerm.length > 0) {
+            recallSource = "cold_fallback";
+            recalledMemoryCount = longTerm.length;
             this.publishRecallResults({
               title: "Long-Term Memories (Fallback)",
               results: longTerm,
@@ -1838,6 +1910,7 @@ export class Orchestrator {
               retrievalQuery,
               sessionKey,
             });
+            impressionRecorded = true;
           }
         }
       }
@@ -2005,9 +2078,39 @@ export class Orchestrator {
     const timingParts = Object.entries(timings).map(([k, v]) => `${k}=${v}`).join(", ");
     log.debug(`recall: ${timingParts}`);
 
-    if (sections.length === 0) return "";
+    if (!impressionRecorded && sessionKey && this.config.recordEmptyRecallImpressions) {
+      this.lastRecall
+        .record({ sessionKey, query: retrievalQuery, memoryIds: [] })
+        .catch((err) => log.debug(`last recall record failed: ${err}`));
+    }
 
-    return sections.join("\n\n---\n\n");
+    const context = sections.length === 0 ? "" : sections.join("\n\n---\n\n");
+    this.emitTrace({
+      kind: "recall_summary",
+      traceId: createHash("sha256")
+        .update(`${sessionKey ?? "default"}:${Date.now()}:${promptHash}`)
+        .digest("hex")
+        .slice(0, 16),
+      operation: "recall",
+      sessionKey,
+      promptHash,
+      promptLength: prompt.length,
+      retrievalQueryHash,
+      retrievalQueryLength: retrievalQuery.length,
+      recallMode,
+      recallResultLimit,
+      qmdEnabled: this.config.qmdEnabled,
+      qmdAvailable: this.qmd.isAvailable(),
+      recallNamespaces,
+      source: recallSource,
+      recalledMemoryCount,
+      injected: context.length > 0,
+      contextChars: context.length,
+      durationMs: Date.now() - recallStart,
+      timings: { ...timings },
+    });
+
+    return context;
   }
 
   async processTurn(
@@ -2780,6 +2883,14 @@ export class Orchestrator {
         }));
       } catch { /* fail-open */ }
     }
+    if (
+      recentInThread.length === 0 &&
+      this.config.graphWriteSessionAdjacencyEnabled !== false &&
+      fallbackCausalPredecessor &&
+      fallbackCausalPredecessor !== memoryRelPath
+    ) {
+      recentInThread.push(fallbackCausalPredecessor);
+    }
     const causalPredecessor = recentInThread[recentInThread.length - 1] ?? fallbackCausalPredecessor;
     await this.graphIndexFor(storage).onMemoryWritten({
       memoryPath: memoryRelPath,
@@ -3462,6 +3573,15 @@ export class Orchestrator {
       return `[${i + 1}] ${r.path} (score: ${r.score.toFixed(3)})\n${snippet}`;
     });
     return `## ${title}\n\n${lines.join("\n\n")}`;
+  }
+
+  private emitTrace(event: EngramTraceEvent): void {
+    try {
+      const cb = (globalThis as any).__openclawEngramTrace;
+      if (typeof cb === "function") cb(event);
+    } catch (err) {
+      log.debug(`trace callback failed: ${err}`);
+    }
   }
 
   private publishRecallResults(options: {

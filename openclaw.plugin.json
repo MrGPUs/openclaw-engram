@@ -233,6 +233,11 @@
         "default": true,
         "description": "Boost frequently accessed memories in search results"
       },
+      "recordEmptyRecallImpressions": {
+        "type": "boolean",
+        "default": false,
+        "description": "Record recall impressions with empty memoryIds when no memory context is injected."
+      },
       "recallPlannerEnabled": {
         "type": "boolean",
         "default": true,
@@ -342,6 +347,21 @@
         "default": false,
         "description": "Enable graph recall planner mode (`graph_mode`). Requires multiGraphMemoryEnabled. Default false."
       },
+      "graphExpandedIntentEnabled": {
+        "type": "boolean",
+        "default": true,
+        "description": "Escalate broader causal/timeline phrasing into graph_mode planning."
+      },
+      "graphAssistInFullModeEnabled": {
+        "type": "boolean",
+        "default": true,
+        "description": "Run bounded graph expansion during full recall mode when seed results exist."
+      },
+      "graphAssistMinSeedResults": {
+        "type": "number",
+        "default": 3,
+        "description": "Minimum seed recall results required before full-mode graph assist runs."
+      },
       "entityGraphEnabled": {
         "type": "boolean",
         "default": true,
@@ -351,6 +371,11 @@
         "type": "boolean",
         "default": true,
         "description": "Build temporal sequence graph within threads (requires multiGraphMemoryEnabled). Default true."
+      },
+      "graphWriteSessionAdjacencyEnabled": {
+        "type": "boolean",
+        "default": true,
+        "description": "Write fallback temporal adjacency edges for consecutive extracted memories in the same session."
       },
       "causalGraphEnabled": {
         "type": "boolean",

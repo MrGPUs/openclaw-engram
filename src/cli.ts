@@ -1,5 +1,5 @@
 import path from "node:path";
-import { access, readFile } from "node:fs/promises";
+import { access, readFile, readdir, unlink } from "node:fs/promises";
 import type { Orchestrator } from "./orchestrator.js";
 import { ThreadingManager } from "./threading.js";
 import type { TranscriptEntry } from "./types.js";
@@ -29,6 +29,92 @@ interface CliCommand {
   argument(name: string, desc: string): CliCommand;
   action(fn: (...args: unknown[]) => Promise<void> | void): CliCommand;
   command(name: string): CliCommand;
+}
+
+export interface DedupeCandidate {
+  path: string;
+  content: string;
+  frontmatter: {
+    id?: string;
+    confidence?: number;
+    updated?: string;
+    created?: string;
+  };
+}
+
+export interface ExactDedupePlan {
+  groups: number;
+  duplicates: number;
+  keepPaths: string[];
+  deletePaths: string[];
+}
+
+function rankCandidateForKeep(a: DedupeCandidate, b: DedupeCandidate): number {
+  const aConfidence = typeof a.frontmatter.confidence === "number" ? a.frontmatter.confidence : 0;
+  const bConfidence = typeof b.frontmatter.confidence === "number" ? b.frontmatter.confidence : 0;
+  if (aConfidence !== bConfidence) return bConfidence - aConfidence;
+
+  const aTs = Date.parse(a.frontmatter.updated ?? a.frontmatter.created ?? "");
+  const bTs = Date.parse(b.frontmatter.updated ?? b.frontmatter.created ?? "");
+  const aTime = Number.isNaN(aTs) ? 0 : aTs;
+  const bTime = Number.isNaN(bTs) ? 0 : bTs;
+  if (aTime !== bTime) return bTime - aTime;
+
+  return a.path.localeCompare(b.path);
+}
+
+function buildDedupePlan(
+  memories: DedupeCandidate[],
+  keyBuilder: (memory: DedupeCandidate) => string,
+): ExactDedupePlan {
+  const byKey = new Map<string, DedupeCandidate[]>();
+  for (const memory of memories) {
+    const key = keyBuilder(memory);
+    if (key.length === 0) continue;
+    const existing = byKey.get(key);
+    if (existing) {
+      existing.push(memory);
+    } else {
+      byKey.set(key, [memory]);
+    }
+  }
+
+  const keepPaths: string[] = [];
+  const deletePaths: string[] = [];
+  let groups = 0;
+  let duplicates = 0;
+
+  for (const entries of byKey.values()) {
+    if (entries.length <= 1) continue;
+    groups += 1;
+    duplicates += entries.length - 1;
+    const ranked = [...entries].sort(rankCandidateForKeep);
+    keepPaths.push(ranked[0].path);
+    for (let i = 1; i < ranked.length; i += 1) {
+      deletePaths.push(ranked[i].path);
+    }
+  }
+
+  return { groups, duplicates, keepPaths, deletePaths };
+}
+
+function normalizeAggressiveBody(content: string): string {
+  return content
+    .normalize("NFKC")
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+    .replace(/[`*_~>#-]+/g, " ")
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+export function planExactDuplicateDeletions(memories: DedupeCandidate[]): ExactDedupePlan {
+  return buildDedupePlan(memories, (memory) => memory.content.trim());
+}
+
+export function planAggressiveDuplicateDeletions(memories: DedupeCandidate[]): ExactDedupePlan {
+  return buildDedupePlan(memories, (memory) => normalizeAggressiveBody(memory.content));
 }
 
 async function getPluginVersion(): Promise<string> {
@@ -61,6 +147,66 @@ async function resolveMemoryDirForNamespace(orchestrator: Orchestrator, namespac
     return (await exists(candidate)) ? candidate : orchestrator.config.memoryDir;
   }
   return candidate;
+}
+
+async function readAllMemoryFiles(memoryDir: string): Promise<DedupeCandidate[]> {
+  const roots = [path.join(memoryDir, "facts"), path.join(memoryDir, "corrections")];
+  const out: DedupeCandidate[] = [];
+
+  const walk = async (dir: string): Promise<void> => {
+    let entries: Array<{ isDirectory(): boolean; isFile(): boolean; name: string | Buffer }>;
+    try {
+      entries = (await readdir(dir, { withFileTypes: true })) as Array<{
+        isDirectory(): boolean;
+        isFile(): boolean;
+        name: string | Buffer;
+      }>;
+    } catch {
+      return;
+    }
+
+    for (const entry of entries) {
+      const entryName = typeof entry.name === "string" ? entry.name : entry.name.toString("utf-8");
+      const fullPath = path.join(dir, entryName);
+      if (entry.isDirectory()) {
+        await walk(fullPath);
+        continue;
+      }
+      if (!entry.isFile() || !entryName.endsWith(".md")) continue;
+
+      try {
+        const raw = await readFile(fullPath, "utf-8");
+        const parsed = raw.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
+        if (!parsed) continue;
+        const fmRaw = parsed[1];
+        const body = parsed[2] ?? "";
+        const get = (key: string): string => {
+          const match = fmRaw.match(new RegExp(`^${key}:\\s*(.+)$`, "m"));
+          return match ? match[1].trim() : "";
+        };
+        const confidenceRaw = get("confidence");
+        const confidence = confidenceRaw.length > 0 ? Number(confidenceRaw) : undefined;
+        out.push({
+          path: fullPath,
+          content: body,
+          frontmatter: {
+            id: get("id") || undefined,
+            confidence: Number.isFinite(confidence as number) ? confidence : undefined,
+            updated: get("updated") || undefined,
+            created: get("created") || undefined,
+          },
+        });
+      } catch {
+        // Skip unreadable/malformed files.
+      }
+    }
+  };
+
+  for (const root of roots) {
+    await walk(root);
+  }
+
+  return out;
 }
 
 export function registerCli(api: CliApi, orchestrator: Orchestrator): void {
@@ -241,6 +387,126 @@ export function registerCli(api: CliApi, orchestrator: Orchestrator): void {
             pluginVersion,
           });
           console.log("OK");
+        });
+
+      cmd
+        .command("dedupe-exact")
+        .description("Delete exact duplicate memory entries (same body text), keeping highest-confidence/newest copy")
+        .option("--dry-run", "Show what would be deleted without deleting files")
+        .option("--namespace <ns>", "Namespace to dedupe (v3.0+, default: config defaultNamespace)", "")
+        .option("--qmd-sync", "Run QMD update/embed after deletions (default: off)")
+        .action(async (...args: unknown[]) => {
+          const options = (args[0] ?? {}) as Record<string, unknown>;
+          const dryRun = options.dryRun === true;
+          const namespace = options.namespace ? String(options.namespace) : "";
+          const qmdSync = options.qmdSync === true;
+
+          const memoryDir = await resolveMemoryDirForNamespace(orchestrator, namespace);
+          const memories = await readAllMemoryFiles(memoryDir);
+          const plan = planExactDuplicateDeletions(memories);
+
+          console.log(`Scanned ${memories.length} memory files in ${memoryDir}`);
+          console.log(`Duplicate groups: ${plan.groups}`);
+          console.log(`Duplicate files to delete: ${plan.deletePaths.length}`);
+
+          if (plan.deletePaths.length === 0) {
+            console.log("No exact duplicates found.");
+            return;
+          }
+
+          if (dryRun) {
+            console.log("Dry run enabled. No files deleted.");
+            for (const filePath of plan.deletePaths.slice(0, 50)) {
+              console.log(`  - ${filePath}`);
+            }
+            if (plan.deletePaths.length > 50) {
+              console.log(`  ... and ${plan.deletePaths.length - 50} more`);
+            }
+            return;
+          }
+
+          let deleted = 0;
+          for (const filePath of plan.deletePaths) {
+            try {
+              await unlink(filePath);
+              deleted += 1;
+            } catch (err) {
+              console.log(`  failed to delete ${filePath}: ${String(err)}`);
+            }
+          }
+          console.log(`Deleted ${deleted}/${plan.deletePaths.length} duplicate files.`);
+
+          if (qmdSync) {
+            await orchestrator.qmd.probe();
+            if (orchestrator.qmd.isAvailable()) {
+              await orchestrator.qmd.update();
+              await orchestrator.qmd.embed();
+              console.log("QMD sync complete.");
+            } else {
+              console.log(`QMD unavailable in this process; skipped sync. Status: ${orchestrator.qmd.debugStatus()}`);
+            }
+          }
+        });
+
+      cmd
+        .command("dedupe-aggressive")
+        .description(
+          "Delete aggressively-normalized duplicate memory entries (formatting/case/punctuation-insensitive)",
+        )
+        .option("--dry-run", "Show what would be deleted without deleting files")
+        .option("--namespace <ns>", "Namespace to dedupe (v3.0+, default: config defaultNamespace)", "")
+        .option("--qmd-sync", "Run QMD update/embed after deletions (default: off)")
+        .action(async (...args: unknown[]) => {
+          const options = (args[0] ?? {}) as Record<string, unknown>;
+          const dryRun = options.dryRun === true;
+          const namespace = options.namespace ? String(options.namespace) : "";
+          const qmdSync = options.qmdSync === true;
+
+          const memoryDir = await resolveMemoryDirForNamespace(orchestrator, namespace);
+          const memories = await readAllMemoryFiles(memoryDir);
+          const plan = planAggressiveDuplicateDeletions(memories);
+
+          console.log(`Scanned ${memories.length} memory files in ${memoryDir}`);
+          console.log(`Duplicate groups: ${plan.groups}`);
+          console.log(`Duplicate files to delete: ${plan.deletePaths.length}`);
+
+          if (plan.deletePaths.length === 0) {
+            console.log("No aggressive duplicates found.");
+            return;
+          }
+
+          if (dryRun) {
+            console.log("Dry run enabled. No files deleted.");
+            for (const filePath of plan.deletePaths.slice(0, 50)) {
+              console.log(`  - ${filePath}`);
+            }
+            if (plan.deletePaths.length > 50) {
+              console.log(`  ... and ${plan.deletePaths.length - 50} more`);
+            }
+            return;
+          }
+
+          let deleted = 0;
+          for (const filePath of plan.deletePaths) {
+            try {
+              await unlink(filePath);
+              deleted += 1;
+            } catch (err) {
+              console.log(`  failed to delete ${filePath}: ${String(err)}`);
+            }
+          }
+          console.log(`Deleted ${deleted}/${plan.deletePaths.length} duplicate files.`);
+
+          if (qmdSync) {
+            await orchestrator.qmd.probe();
+            if (orchestrator.qmd.isAvailable()) {
+              await orchestrator.qmd.update();
+              await orchestrator.qmd.embed();
+              console.log("QMD sync complete.");
+            } else {
+              console.log(`QMD unavailable in this process; skipped sync. Status: ${orchestrator.qmd.debugStatus()}`);
+            }
+          }
         });
 
       cmd

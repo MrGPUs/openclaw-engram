@@ -39,6 +39,7 @@ test("v2.4 extended hourly summary parser uses Topics bullets for recall", async
     accessTrackingBufferMaxSize: 100,
     recencyWeight: 0.2,
     boostAccessCount: true,
+    recordEmptyRecallImpressions: false,
     queryExpansionEnabled: false,
     queryExpansionMaxQueries: 4,
     queryExpansionMinTokenLen: 3,
