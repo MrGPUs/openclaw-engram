@@ -2266,7 +2266,7 @@ export class Orchestrator {
     reason: "trigger_mode" | "heartbeat_observer",
   ): Promise<void> {
     if (!this.shouldQueueExtraction(turnsToExtract)) {
-      await this.buffer.clearAfterExtraction();
+      log.debug(`extraction dedupe skip: preserving buffer (${reason})`);
       return;
     }
 

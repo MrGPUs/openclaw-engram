@@ -76,3 +76,30 @@ test("observeSessionHeartbeat no-ops when observer is disabled", async () => {
 
   assert.equal(invoked, false);
 });
+
+test("queueBufferedExtraction preserves buffered turns when dedupe skips enqueue", async () => {
+  let cleared = false;
+  let queued = false;
+  const fake = {
+    shouldQueueExtraction: () => false,
+    buffer: {
+      clearAfterExtraction: async () => {
+        cleared = true;
+      },
+    },
+    extractionQueue: {
+      push: () => {
+        queued = true;
+      },
+    },
+  };
+
+  await (Orchestrator.prototype as any).queueBufferedExtraction.call(
+    fake,
+    [{ role: "user", content: "dup", timestamp: "2026-02-25T00:00:00.000Z" }],
+    "heartbeat_observer",
+  );
+
+  assert.equal(queued, false);
+  assert.equal(cleared, false);
+});
