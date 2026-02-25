@@ -8,6 +8,7 @@ import type {
   TriggerMode,
 } from "./types.js";
 import { log } from "./logger.js";
+import { cloneDefaultSessionObserverBands } from "./session-observer-bands.js";
 
 const DEFAULT_MEMORY_DIR = path.join(
   process.env.HOME ?? "~",
@@ -136,11 +137,7 @@ export function parseConfig(raw: unknown): PluginConfig {
               : 0,
         }))
         .filter((band) => band.maxBytes > 0)
-    : [
-        { maxBytes: 50_000, triggerDeltaBytes: 6_000, triggerDeltaTokens: 1_200 },
-        { maxBytes: 200_000, triggerDeltaBytes: 12_000, triggerDeltaTokens: 2_400 },
-        { maxBytes: 1_000_000_000, triggerDeltaBytes: 24_000, triggerDeltaTokens: 4_800 },
-      ];
+    : cloneDefaultSessionObserverBands();
 
   const principalRules: PrincipalRule[] = Array.isArray(cfg.principalFromSessionKeyRules)
     ? (cfg.principalFromSessionKeyRules as any[]).map((r) => ({

@@ -2,6 +2,7 @@ import path from "node:path";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { log } from "./logger.js";
 import type { SessionObserverBandConfig } from "./types.js";
+import { cloneDefaultSessionObserverBands } from "./session-observer-bands.js";
 
 interface SessionObserverCursor {
   sessionKey: string;
@@ -55,11 +56,7 @@ export function normalizeObserverBands(
     .sort((a, b) => a.maxBytes - b.maxBytes);
 
   if (normalized.length === 0) {
-    return [
-      { maxBytes: 50_000, triggerDeltaBytes: 6_000, triggerDeltaTokens: 1_200 },
-      { maxBytes: 200_000, triggerDeltaBytes: 12_000, triggerDeltaTokens: 2_400 },
-      { maxBytes: 1_000_000_000, triggerDeltaBytes: 24_000, triggerDeltaTokens: 4_800 },
-    ];
+    return cloneDefaultSessionObserverBands();
   }
 
   const last = normalized[normalized.length - 1];
@@ -224,7 +221,8 @@ export class SessionObserverState {
     const deltaBytes = totalBytes - session.cursorBytes;
     const deltaTokens = totalTokens - session.cursorTokens;
     const crossedThreshold =
-      deltaBytes >= band.triggerDeltaBytes || deltaTokens >= band.triggerDeltaTokens;
+      (band.triggerDeltaBytes > 0 && deltaBytes >= band.triggerDeltaBytes)
+      || (band.triggerDeltaTokens > 0 && deltaTokens >= band.triggerDeltaTokens);
     session.lastObservedAt = nowIso;
 
     if (!crossedThreshold) {

@@ -173,3 +173,31 @@ test("session observer save merges shared state across instances", async () => {
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test("session observer does not trigger when both thresholds are zero", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "engram-session-observer-zero-threshold-"));
+  try {
+    const observer = new SessionObserverState({
+      memoryDir: dir,
+      debounceMs: 60_000,
+      bands: [{ maxBytes: 100_000, triggerDeltaBytes: 0, triggerDeltaTokens: 0 }],
+    });
+    await observer.load();
+
+    await observer.observe({
+      sessionKey: "agent:generalist:main",
+      totalBytes: 10_000,
+      totalTokens: 2_000,
+      observedAt: "2026-02-25T00:00:00.000Z",
+    });
+    const second = await observer.observe({
+      sessionKey: "agent:generalist:main",
+      totalBytes: 99_000,
+      totalTokens: 9_900,
+      observedAt: "2026-02-25T00:01:00.000Z",
+    });
+    assert.equal(second.triggered, false);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
