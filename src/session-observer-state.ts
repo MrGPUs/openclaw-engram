@@ -243,7 +243,9 @@ export class SessionObserverState {
   }
 
   private enqueueSave(): Promise<void> {
-    this.saveQueue = this.saveQueue.then(() => this.save());
+    this.saveQueue = this.saveQueue
+      .catch(() => undefined)
+      .then(() => this.save());
     return this.saveQueue;
   }
 

@@ -247,3 +247,33 @@ test("observeSessionHeartbeat skips observer state update when extraction dedupe
   assert.equal(observed, false);
   assert.equal(queued, false);
 });
+
+test("shouldQueueExtraction supports non-committing dedupe prechecks", async () => {
+  const turns: BufferTurn[] = [
+    {
+      role: "user",
+      content: "same turn body",
+      timestamp: "2026-02-25T00:00:00.000Z",
+      sessionKey: "agent:generalist:main",
+    },
+  ];
+
+  const fake = {
+    config: {
+      sessionObserverEnabled: true,
+      extractionDedupeEnabled: true,
+      extractionMaxTurnChars: 10_000,
+      extractionDedupeWindowMs: 60_000,
+    },
+    recentExtractionFingerprints: new Map<string, number>(),
+    shouldQueueExtraction: (Orchestrator.prototype as any).shouldQueueExtraction,
+  };
+
+  const precheck = fake.shouldQueueExtraction.call(fake, turns, { commit: false });
+  assert.equal(precheck, true);
+  assert.equal(fake.recentExtractionFingerprints.size, 0);
+
+  const commit = fake.shouldQueueExtraction.call(fake, turns, { commit: true });
+  assert.equal(commit, true);
+  assert.equal(fake.recentExtractionFingerprints.size, 1);
+});

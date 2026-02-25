@@ -2259,7 +2259,7 @@ export class Orchestrator {
           log.debug(`heartbeat observer skipped: mixed session buffer for ${sessionKey}`);
           return;
         }
-        if (!this.shouldQueueExtraction(turns)) {
+        if (!this.shouldQueueExtraction(turns, { commit: false })) {
           log.debug(`heartbeat observer skipped: extraction dedupe for ${sessionKey}`);
           return;
         }
@@ -2273,7 +2273,7 @@ export class Orchestrator {
         log.debug(
           `heartbeat observer trigger: session=${sessionKey} deltaBytes=${decision.deltaBytes} deltaTokens=${decision.deltaTokens}`,
         );
-        await this.queueBufferedExtraction(turns, "heartbeat_observer", { skipDedupeCheck: true });
+        await this.queueBufferedExtraction(turns, "heartbeat_observer");
       });
 
     this.heartbeatObserverChains.set(sessionKey, next);
@@ -2310,7 +2310,10 @@ export class Orchestrator {
     log.debug(`queued extraction from ${reason}`);
   }
 
-  private shouldQueueExtraction(turns: BufferTurn[]): boolean {
+  private shouldQueueExtraction(
+    turns: BufferTurn[],
+    options: { commit?: boolean } = {},
+  ): boolean {
     if (!this.config.extractionDedupeEnabled) return true;
     if (!Array.isArray(turns) || turns.length === 0) return false;
 
@@ -2329,9 +2332,11 @@ export class Orchestrator {
       return false;
     }
 
-    this.recentExtractionFingerprints.set(fingerprint, now);
+    if (options.commit !== false) {
+      this.recentExtractionFingerprints.set(fingerprint, now);
+    }
     // Keep this cache bounded to avoid unbounded growth.
-    if (this.recentExtractionFingerprints.size > 200) {
+    if (options.commit !== false && this.recentExtractionFingerprints.size > 200) {
       const entries = Array.from(this.recentExtractionFingerprints.entries()).sort(
         (a, b) => a[1] - b[1],
       );
