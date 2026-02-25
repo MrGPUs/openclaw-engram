@@ -25,6 +25,12 @@ All notable changes to this project will be documented in this file.
   - Added regression coverage for raw-prompt preservation in non-cron and cron-policy-disabled paths.
 
 ### Added
+- v8.5 active session observer + heartbeat thresholds slice:
+  - Added `src/session-observer-state.ts` to persist per-session observer cursors and threshold/debounce decisions.
+  - Added heartbeat observer integration (`agent_heartbeat`) to queue proactive extraction when session growth crosses configured byte/token bands.
+  - Added config surface and schema/docs wiring: `sessionObserverEnabled`, `sessionObserverDebounceMs`, `sessionObserverBands`.
+  - Added tests: `tests/session-observer-state.test.ts` and `tests/heartbeat-observe-trigger.test.ts`.
+  - Normalized session-key examples in docs/comments to generic placeholders to avoid installation-specific identifiers.
 - v8.4 improvement-loop register slice (Task 7 / PR #43):
   - Added structured improvement-loop register parsing/serialization helpers in `src/identity-continuity.ts`.
   - Extended `StorageManager` with typed register APIs: read/write register, upsert loop, and review loop metadata updates.
