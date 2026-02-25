@@ -79,7 +79,9 @@ export class CompoundingEngine {
 
     const entries = await this.readFeedbackEntriesForWeek(weekId);
     const mistakes = this.buildMistakes(entries);
-    const continuity = await this.readContinuityAuditReferences(weekId);
+    const continuity = this.config.continuityAuditEnabled
+      ? await this.readContinuityAuditReferences(weekId)
+      : { monthId: monthIdFromIsoWeek(weekId), weeklyPath: null, monthlyPath: null };
 
     // Write weekly report (always, even if empty: "day-one outcomes").
     const reportPath = path.join(this.weeklyDir, `${weekId}.md`);
@@ -100,15 +102,13 @@ export class CompoundingEngine {
     const period = opts?.period === "monthly" ? "monthly" : "weekly";
     const key = opts?.key?.trim() || (period === "weekly" ? isoWeekId(new Date()) : isoMonthId(new Date()));
     const nowIso = new Date().toISOString();
-    const [anchorPresent, improvementLoopPresent, incidents, mistakes] = await Promise.all([
+    const [anchorPresent, improvementLoopPresent, openIncidents, closedIncidents, mistakes] = await Promise.all([
       this.readNonEmptyFile(this.identityAnchorPath),
       this.readNonEmptyFile(this.identityImprovementLoopsPath),
-      this.readContinuityIncidents(),
+      this.readContinuityIncidents(200, "open"),
+      this.readContinuityIncidents(200, "closed"),
       this.readMistakes(),
     ]);
-
-    const openIncidents = incidents.filter((i) => i.state === "open");
-    const closedIncidents = incidents.filter((i) => i.state === "closed");
     const hardeningCandidates: string[] = [];
     if (!anchorPresent) {
       hardeningCandidates.push("Create/update identity anchor baseline and verify recovery injection path.");
@@ -291,17 +291,26 @@ export class CompoundingEngine {
     }
   }
 
-  private async readContinuityIncidents(): Promise<ContinuityIncidentRecord[]> {
+  private async readContinuityIncidents(
+    limit: number = 200,
+    state?: ContinuityIncidentRecord["state"],
+  ): Promise<ContinuityIncidentRecord[]> {
+    const normalizedLimit = Number.isFinite(limit) ? limit : 0;
+    const cappedLimit = Math.max(0, Math.floor(normalizedLimit));
+    if (cappedLimit === 0) return [];
     const incidents: ContinuityIncidentRecord[] = [];
     try {
       const names = await readdir(this.identityIncidentsDir);
       const files = names.filter((n) => n.endsWith(".md")).sort().reverse();
       for (const file of files) {
+        if (incidents.length >= cappedLimit) break;
         const filePath = path.join(this.identityIncidentsDir, file);
         try {
           const raw = await readFile(filePath, "utf-8");
           const parsed = parseContinuityIncident(raw);
-          if (parsed) incidents.push(parsed);
+          if (!parsed) continue;
+          if (state && parsed.state !== state) continue;
+          incidents.push(parsed);
         } catch {
           // fail-open
         }
