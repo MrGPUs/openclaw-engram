@@ -1,5 +1,5 @@
 import path from "node:path";
-import { mkdir, open, readFile, unlink, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import { log } from "./logger.js";
 import type { SessionObserverBandConfig } from "./types.js";
 import { cloneDefaultSessionObserverBands } from "./session-observer-bands.js";
@@ -73,6 +73,7 @@ export function normalizeObserverBands(
 export class SessionObserverState {
   private readonly statePath: string;
   private readonly lockPath: string;
+  private readonly lockStaleMs = 120_000;
   private readonly debounceMs: number;
   private readonly bands: SessionObserverBandConfig[];
   private sessions = new Map<string, SessionObserverCursor>();
@@ -134,6 +135,15 @@ export class SessionObserverState {
         return;
       } catch (err: any) {
         if (err?.code !== "EEXIST") throw err;
+        try {
+          const lockInfo = await stat(this.lockPath);
+          if (Date.now() - lockInfo.mtimeMs > this.lockStaleMs) {
+            await unlink(this.lockPath).catch(() => {});
+            continue;
+          }
+        } catch {
+          // Lock might have been released between EEXIST and stat/read.
+        }
         await new Promise((resolve) => setTimeout(resolve, 25));
       }
     }

@@ -18,6 +18,7 @@ test("observeSessionHeartbeat queues buffered extraction when observer threshold
 
   const fake = {
     config: { sessionObserverEnabled: true },
+    heartbeatObserverChains: new Map<string, Promise<void>>(),
     transcript: {
       estimateSessionFootprint: async () => ({ bytes: 25_000, tokens: 6_250 }),
     },
@@ -51,6 +52,7 @@ test("observeSessionHeartbeat no-ops when observer is disabled", async () => {
   let invoked = false;
   const fake = {
     config: { sessionObserverEnabled: false },
+    heartbeatObserverChains: new Map<string, Promise<void>>(),
     transcript: {
       estimateSessionFootprint: async () => {
         invoked = true;
@@ -81,6 +83,7 @@ test("observeSessionHeartbeat skips when buffer contains mixed session turns", a
   let queued = false;
   const fake = {
     config: { sessionObserverEnabled: true },
+    heartbeatObserverChains: new Map<string, Promise<void>>(),
     transcript: {
       estimateSessionFootprint: async () => ({ bytes: 25_000, tokens: 6_250 }),
     },
@@ -146,4 +149,45 @@ test("queueBufferedExtraction preserves buffered turns when dedupe skips enqueue
 
   assert.equal(queued, false);
   assert.equal(cleared, false);
+});
+
+test("observeSessionHeartbeat serializes per-session observer runs", async () => {
+  let inFlight = 0;
+  let maxInFlight = 0;
+  const fake = {
+    config: { sessionObserverEnabled: true },
+    heartbeatObserverChains: new Map<string, Promise<void>>(),
+    transcript: {
+      estimateSessionFootprint: async () => ({ bytes: 10_000, tokens: 2_000 }),
+    },
+    sessionObserver: {
+      observe: async () => {
+        inFlight += 1;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        inFlight -= 1;
+        return {
+          triggered: false,
+          deltaBytes: 0,
+          deltaTokens: 0,
+          band: { maxBytes: 50_000, triggerDeltaBytes: 6_000, triggerDeltaTokens: 1_200 },
+        };
+      },
+    },
+    buffer: { getTurns: () => [] },
+    queueBufferedExtraction: async () => {},
+  };
+
+  await Promise.all([
+    (Orchestrator.prototype as any).observeSessionHeartbeat.call(
+      fake,
+      "agent:generalist:main",
+    ),
+    (Orchestrator.prototype as any).observeSessionHeartbeat.call(
+      fake,
+      "agent:generalist:main",
+    ),
+  ]);
+
+  assert.equal(maxInFlight, 1);
 });

@@ -543,6 +543,7 @@ export class Orchestrator {
   // Queue stores promises that resolve when extraction should run
   private extractionQueue: Array<() => Promise<void>> = [];
   private queueProcessing = false;
+  private heartbeatObserverChains = new Map<string, Promise<void>>();
   private recentExtractionFingerprints = new Map<string, number>();
   private nonZeroExtractionsSinceConsolidation = 0;
   private lastConsolidationRunAtMs = 0;
@@ -2246,24 +2247,39 @@ export class Orchestrator {
   async observeSessionHeartbeat(sessionKey: string): Promise<void> {
     if (this.config.sessionObserverEnabled !== true) return;
     if (!sessionKey || sessionKey.length === 0) return;
-    const footprint = await this.transcript.estimateSessionFootprint(sessionKey);
-    const decision = await this.sessionObserver.observe({
-      sessionKey,
-      totalBytes: footprint.bytes,
-      totalTokens: footprint.tokens,
-    });
-    if (!decision.triggered) return;
-    const turns = this.buffer.getTurns();
-    if (turns.length === 0) return;
-    const mixedSessionTurns = turns.some((turn) => turn.sessionKey !== sessionKey);
-    if (mixedSessionTurns) {
-      log.debug(`heartbeat observer skipped: mixed session buffer for ${sessionKey}`);
-      return;
+
+    const previous = this.heartbeatObserverChains.get(sessionKey) ?? Promise.resolve();
+    const next = previous
+      .catch(() => undefined)
+      .then(async () => {
+        const footprint = await this.transcript.estimateSessionFootprint(sessionKey);
+        const decision = await this.sessionObserver.observe({
+          sessionKey,
+          totalBytes: footprint.bytes,
+          totalTokens: footprint.tokens,
+        });
+        if (!decision.triggered) return;
+        const turns = this.buffer.getTurns();
+        if (turns.length === 0) return;
+        const mixedSessionTurns = turns.some((turn) => turn.sessionKey !== sessionKey);
+        if (mixedSessionTurns) {
+          log.debug(`heartbeat observer skipped: mixed session buffer for ${sessionKey}`);
+          return;
+        }
+        log.debug(
+          `heartbeat observer trigger: session=${sessionKey} deltaBytes=${decision.deltaBytes} deltaTokens=${decision.deltaTokens}`,
+        );
+        await this.queueBufferedExtraction(turns, "heartbeat_observer");
+      });
+
+    this.heartbeatObserverChains.set(sessionKey, next);
+    try {
+      await next;
+    } finally {
+      if (this.heartbeatObserverChains.get(sessionKey) === next) {
+        this.heartbeatObserverChains.delete(sessionKey);
+      }
     }
-    log.debug(
-      `heartbeat observer trigger: session=${sessionKey} deltaBytes=${decision.deltaBytes} deltaTokens=${decision.deltaTokens}`,
-    );
-    await this.queueBufferedExtraction(turns, "heartbeat_observer");
   }
 
   private async queueBufferedExtraction(

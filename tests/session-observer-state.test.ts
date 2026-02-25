@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import os from "node:os";
 import path from "node:path";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, utimes, writeFile } from "node:fs/promises";
 import { SessionObserverState } from "../src/session-observer-state.ts";
 
 test("session observer establishes baseline then triggers when threshold is crossed", async () => {
@@ -237,6 +237,37 @@ test("session observer concurrent saves preserve both instances", async () => {
     const parsed = JSON.parse(raw) as { sessions: Record<string, unknown> };
     assert.ok(parsed.sessions["agent:generalist:main"]);
     assert.ok(parsed.sessions["agent:research:main"]);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("session observer recovers stale lock files", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "engram-session-observer-stale-lock-"));
+  try {
+    const stateDir = path.join(dir, "state");
+    const lockPath = path.join(stateDir, "session-observer-state.lock");
+    await mkdir(stateDir, { recursive: true });
+    await writeFile(lockPath, "stale", "utf-8");
+    const stale = new Date(Date.now() - 5 * 60_000);
+    await utimes(lockPath, stale, stale);
+
+    const observer = new SessionObserverState({
+      memoryDir: dir,
+      debounceMs: 60_000,
+      bands: [{ maxBytes: 100_000, triggerDeltaBytes: 500, triggerDeltaTokens: 100 }],
+    });
+    await observer.load();
+    await observer.observe({
+      sessionKey: "agent:generalist:main",
+      totalBytes: 10_000,
+      totalTokens: 2_000,
+      observedAt: "2026-02-25T00:00:00.000Z",
+    });
+
+    const raw = await readFile(path.join(stateDir, "session-observer-state.json"), "utf-8");
+    const parsed = JSON.parse(raw) as { sessions: Record<string, unknown> };
+    assert.ok(parsed.sessions["agent:generalist:main"]);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
