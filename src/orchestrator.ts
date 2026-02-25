@@ -2252,13 +2252,6 @@ export class Orchestrator {
     const next = previous
       .catch(() => undefined)
       .then(async () => {
-        const footprint = await this.transcript.estimateSessionFootprint(sessionKey);
-        const decision = await this.sessionObserver.observe({
-          sessionKey,
-          totalBytes: footprint.bytes,
-          totalTokens: footprint.tokens,
-        });
-        if (!decision.triggered) return;
         const turns = this.buffer.getTurns();
         if (turns.length === 0) return;
         const mixedSessionTurns = turns.some((turn) => turn.sessionKey !== sessionKey);
@@ -2266,10 +2259,21 @@ export class Orchestrator {
           log.debug(`heartbeat observer skipped: mixed session buffer for ${sessionKey}`);
           return;
         }
+        if (!this.shouldQueueExtraction(turns)) {
+          log.debug(`heartbeat observer skipped: extraction dedupe for ${sessionKey}`);
+          return;
+        }
+        const footprint = await this.transcript.estimateSessionFootprint(sessionKey);
+        const decision = await this.sessionObserver.observe({
+          sessionKey,
+          totalBytes: footprint.bytes,
+          totalTokens: footprint.tokens,
+        });
+        if (!decision.triggered) return;
         log.debug(
           `heartbeat observer trigger: session=${sessionKey} deltaBytes=${decision.deltaBytes} deltaTokens=${decision.deltaTokens}`,
         );
-        await this.queueBufferedExtraction(turns, "heartbeat_observer");
+        await this.queueBufferedExtraction(turns, "heartbeat_observer", { skipDedupeCheck: true });
       });
 
     this.heartbeatObserverChains.set(sessionKey, next);
@@ -2285,8 +2289,9 @@ export class Orchestrator {
   private async queueBufferedExtraction(
     turnsToExtract: BufferTurn[],
     reason: "trigger_mode" | "heartbeat_observer",
+    options: { skipDedupeCheck?: boolean } = {},
   ): Promise<void> {
-    if (!this.shouldQueueExtraction(turnsToExtract)) {
+    if (!options.skipDedupeCheck && !this.shouldQueueExtraction(turnsToExtract)) {
       log.debug(`extraction dedupe skip: preserving buffer (${reason})`);
       return;
     }

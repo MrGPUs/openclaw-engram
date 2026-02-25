@@ -33,6 +33,7 @@ test("observeSessionHeartbeat queues buffered extraction when observer threshold
     buffer: {
       getTurns: () => turns,
     },
+    shouldQueueExtraction: () => true,
     queueBufferedExtraction: async (_turns: BufferTurn[], reason: string) => {
       queued = true;
       queuedReason = reason;
@@ -174,7 +175,17 @@ test("observeSessionHeartbeat serializes per-session observer runs", async () =>
         };
       },
     },
-    buffer: { getTurns: () => [] },
+    buffer: {
+      getTurns: () => [
+        {
+          role: "user",
+          content: "serialized observer",
+          timestamp: "2026-02-25T00:00:00.000Z",
+          sessionKey: "agent:generalist:main",
+        },
+      ],
+    },
+    shouldQueueExtraction: () => true,
     queueBufferedExtraction: async () => {},
   };
 
@@ -190,4 +201,49 @@ test("observeSessionHeartbeat serializes per-session observer runs", async () =>
   ]);
 
   assert.equal(maxInFlight, 1);
+});
+
+test("observeSessionHeartbeat skips observer state update when extraction dedupe would reject", async () => {
+  let observed = false;
+  let queued = false;
+  const fake = {
+    config: { sessionObserverEnabled: true },
+    heartbeatObserverChains: new Map<string, Promise<void>>(),
+    transcript: {
+      estimateSessionFootprint: async () => ({ bytes: 25_000, tokens: 6_250 }),
+    },
+    sessionObserver: {
+      observe: async () => {
+        observed = true;
+        return {
+          triggered: true,
+          deltaBytes: 6_500,
+          deltaTokens: 1_500,
+          band: { maxBytes: 50_000, triggerDeltaBytes: 6_000, triggerDeltaTokens: 1_200 },
+        };
+      },
+    },
+    shouldQueueExtraction: () => false,
+    buffer: {
+      getTurns: () => [
+        {
+          role: "user",
+          content: "dedupe candidate",
+          timestamp: "2026-02-25T00:00:00.000Z",
+          sessionKey: "agent:generalist:main",
+        },
+      ],
+    },
+    queueBufferedExtraction: async () => {
+      queued = true;
+    },
+  };
+
+  await (Orchestrator.prototype as any).observeSessionHeartbeat.call(
+    fake,
+    "agent:generalist:main",
+  );
+
+  assert.equal(observed, false);
+  assert.equal(queued, false);
 });

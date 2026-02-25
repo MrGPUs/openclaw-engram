@@ -10,6 +10,7 @@ interface SessionObserverCursor {
   cursorTokens: number;
   lastObservedAt: string;
   lastTriggeredAt?: string;
+  lastResetAt?: string;
 }
 
 interface SessionObserverPersistedState {
@@ -51,21 +52,36 @@ function mergeSessionCursor(
   const incomingObservedMs = parseIsoMs(incoming.lastObservedAt);
   const existingTriggeredMs = parseIsoMs(existing.lastTriggeredAt);
   const incomingTriggeredMs = parseIsoMs(incoming.lastTriggeredAt);
+  const existingResetMs = parseIsoMs(existing.lastResetAt);
+  const incomingResetMs = parseIsoMs(incoming.lastResetAt);
 
   const observedAt =
     incomingObservedMs >= existingObservedMs ? incoming.lastObservedAt : existing.lastObservedAt;
   const triggeredAt =
     incomingTriggeredMs >= existingTriggeredMs ? incoming.lastTriggeredAt : existing.lastTriggeredAt;
 
-  // Preserve monotonic cursor progression across concurrent instances sharing one memoryDir.
-  const cursorBytes = Math.max(
+  // Preserve monotonic cursor progression except for explicit reset observations.
+  const incomingIsNewer = incomingObservedMs >= existingObservedMs;
+  const incomingHasNewerReset = incomingResetMs > existingResetMs;
+  const allowIncomingReset = incomingIsNewer && incomingHasNewerReset;
+  const keepExistingReset =
+    existingResetMs > incomingResetMs && existingObservedMs >= incomingObservedMs;
+
+  let cursorBytes = Math.max(
     sanitizeNonNegativeInt(existing.cursorBytes),
     sanitizeNonNegativeInt(incoming.cursorBytes),
   );
-  const cursorTokens = Math.max(
+  let cursorTokens = Math.max(
     sanitizeNonNegativeInt(existing.cursorTokens),
     sanitizeNonNegativeInt(incoming.cursorTokens),
   );
+  if (keepExistingReset) {
+    cursorBytes = sanitizeNonNegativeInt(existing.cursorBytes);
+    cursorTokens = sanitizeNonNegativeInt(existing.cursorTokens);
+  } else if (allowIncomingReset) {
+    cursorBytes = sanitizeNonNegativeInt(incoming.cursorBytes);
+    cursorTokens = sanitizeNonNegativeInt(incoming.cursorTokens);
+  }
 
   return {
     sessionKey: existing.sessionKey,
@@ -73,6 +89,8 @@ function mergeSessionCursor(
     cursorTokens,
     lastObservedAt: observedAt,
     lastTriggeredAt: triggeredAt,
+    lastResetAt:
+      incomingResetMs >= existingResetMs ? incoming.lastResetAt : existing.lastResetAt,
   };
 }
 
@@ -138,6 +156,7 @@ export class SessionObserverState {
         lastObservedAt:
           typeof value.lastObservedAt === "string" ? value.lastObservedAt : new Date(0).toISOString(),
         lastTriggeredAt: typeof value.lastTriggeredAt === "string" ? value.lastTriggeredAt : undefined,
+        lastResetAt: typeof value.lastResetAt === "string" ? value.lastResetAt : undefined,
       });
     }
     return next;
@@ -267,6 +286,7 @@ export class SessionObserverState {
       session.cursorBytes = totalBytes;
       session.cursorTokens = totalTokens;
       session.lastObservedAt = nowIso;
+      session.lastResetAt = nowIso;
       this.sessions.set(input.sessionKey, session);
       await this.enqueueSave();
       return { triggered: false, deltaBytes: 0, deltaTokens: 0, band, reason: "baseline" };

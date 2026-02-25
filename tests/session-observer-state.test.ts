@@ -353,3 +353,58 @@ test("session observer merge keeps monotonic cursor across stale instances", asy
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test("session observer merge allows cursor reset when reset is explicitly observed", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "engram-session-observer-reset-"));
+  try {
+    const a = new SessionObserverState({
+      memoryDir: dir,
+      debounceMs: 60_000,
+      bands: [{ maxBytes: 100_000, triggerDeltaBytes: 500, triggerDeltaTokens: 100 }],
+    });
+    const b = new SessionObserverState({
+      memoryDir: dir,
+      debounceMs: 60_000,
+      bands: [{ maxBytes: 100_000, triggerDeltaBytes: 500, triggerDeltaTokens: 100 }],
+    });
+    await a.load();
+    await b.load();
+
+    await a.observe({
+      sessionKey: "agent:generalist:main",
+      totalBytes: 3_000,
+      totalTokens: 750,
+      observedAt: "2026-02-25T00:00:00.000Z",
+    });
+    // Simulate transcript reset on the newer observer path.
+    await a.observe({
+      sessionKey: "agent:generalist:main",
+      totalBytes: 1_000,
+      totalTokens: 250,
+      observedAt: "2026-02-25T00:02:00.000Z",
+    });
+    // Stale instance writes an older, larger cursor with older observation timestamp.
+    await b.observe({
+      sessionKey: "agent:generalist:main",
+      totalBytes: 2_500,
+      totalTokens: 625,
+      observedAt: "2026-02-25T00:01:00.000Z",
+    });
+
+    const raw = await readFile(path.join(dir, "state", "session-observer-state.json"), "utf-8");
+    const parsed = JSON.parse(raw) as {
+      sessions: Record<
+        string,
+        { cursorBytes: number; cursorTokens: number; lastObservedAt: string; lastResetAt?: string }
+      >;
+    };
+    const session = parsed.sessions["agent:generalist:main"];
+    assert.ok(session);
+    assert.equal(session.cursorBytes, 1_000);
+    assert.equal(session.cursorTokens, 250);
+    assert.equal(session.lastObservedAt, "2026-02-25T00:02:00.000Z");
+    assert.equal(session.lastResetAt, "2026-02-25T00:02:00.000Z");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
