@@ -260,8 +260,11 @@ export class SessionObserverState {
     session.lastObservedAt = nowIso;
 
     if (!crossedThreshold) {
-      this.sessions.set(input.sessionKey, session);
-      await this.enqueueSave();
+      const unchanged = deltaBytes === 0 && deltaTokens === 0;
+      if (!unchanged) {
+        this.sessions.set(input.sessionKey, session);
+        await this.enqueueSave();
+      }
       return {
         triggered: false,
         deltaBytes,

@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import os from "node:os";
 import path from "node:path";
-import { mkdir, mkdtemp, readFile, rm, utimes, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { SessionObserverState } from "../src/session-observer-state.ts";
 
 test("session observer establishes baseline then triggers when threshold is crossed", async () => {
@@ -268,6 +268,44 @@ test("session observer recovers stale lock files", async () => {
     const raw = await readFile(path.join(stateDir, "session-observer-state.json"), "utf-8");
     const parsed = JSON.parse(raw) as { sessions: Record<string, unknown> };
     assert.ok(parsed.sessions["agent:generalist:main"]);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("session observer skips state writes when heartbeat footprint is unchanged", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "engram-session-observer-unchanged-"));
+  try {
+    const observer = new SessionObserverState({
+      memoryDir: dir,
+      debounceMs: 60_000,
+      bands: [{ maxBytes: 100_000, triggerDeltaBytes: 500, triggerDeltaTokens: 100 }],
+    });
+    await observer.load();
+
+    await observer.observe({
+      sessionKey: "agent:generalist:main",
+      totalBytes: 10_000,
+      totalTokens: 2_500,
+      observedAt: "2026-02-25T00:00:00.000Z",
+    });
+
+    const savedPath = path.join(dir, "state", "session-observer-state.json");
+    const firstWrite = await stat(savedPath);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    const result = await observer.observe({
+      sessionKey: "agent:generalist:main",
+      totalBytes: 10_000,
+      totalTokens: 2_500,
+      observedAt: "2026-02-25T00:00:10.000Z",
+    });
+
+    const secondWrite = await stat(savedPath);
+    assert.equal(result.triggered, false);
+    assert.equal(result.deltaBytes, 0);
+    assert.equal(result.deltaTokens, 0);
+    assert.equal(secondWrite.mtimeMs, firstWrite.mtimeMs);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

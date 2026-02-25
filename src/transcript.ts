@@ -18,6 +18,7 @@ export class TranscriptManager {
   private stateDir: string;
   private toolUsageDir: string;
   private config: PluginConfig;
+  private sessionFootprintCache = new Map<string, { totalBytes: number; fileSizes: Map<string, number> }>();
 
   /** Default checkpoint TTL in hours */
   private static readonly DEFAULT_CHECKPOINT_TTL_HOURS = 24;
@@ -183,18 +184,68 @@ export class TranscriptManager {
     let bytes = 0;
 
     try {
-      const files = await readdir(channelDir);
-      for (const file of files) {
-        if (!file.endsWith(".jsonl")) continue;
-        try {
-          const fileInfo = await stat(path.join(channelDir, file));
-          bytes += Math.max(0, fileInfo.size);
-        } catch {
-          // fail-open
+      const files = (await readdir(channelDir)).filter((file) => file.endsWith(".jsonl")).sort();
+      const cached = this.sessionFootprintCache.get(sessionKey);
+      if (!cached) {
+        const fileSizes = new Map<string, number>();
+        for (const file of files) {
+          try {
+            const fileInfo = await stat(path.join(channelDir, file));
+            const size = Math.max(0, fileInfo.size);
+            fileSizes.set(file, size);
+            bytes += size;
+          } catch {
+            // fail-open
+          }
         }
+        this.sessionFootprintCache.set(sessionKey, { totalBytes: bytes, fileSizes });
+      } else {
+        bytes = cached.totalBytes;
+        const seen = new Set(files);
+
+        // Drop removed files from the cached total.
+        for (const [cachedFile, cachedSize] of cached.fileSizes.entries()) {
+          if (!seen.has(cachedFile)) {
+            bytes -= cachedSize;
+            cached.fileSizes.delete(cachedFile);
+          }
+        }
+
+        // Stat only newly discovered files.
+        for (const file of files) {
+          if (cached.fileSizes.has(file)) continue;
+          try {
+            const fileInfo = await stat(path.join(channelDir, file));
+            const size = Math.max(0, fileInfo.size);
+            cached.fileSizes.set(file, size);
+            bytes += size;
+          } catch {
+            // fail-open
+          }
+        }
+
+        // Re-stat only the newest shard, where growth happens.
+        const newestFile = files[files.length - 1];
+        if (newestFile) {
+          try {
+            const fileInfo = await stat(path.join(channelDir, newestFile));
+            const size = Math.max(0, fileInfo.size);
+            const previous = cached.fileSizes.get(newestFile) ?? 0;
+            if (size !== previous) {
+              cached.fileSizes.set(newestFile, size);
+              bytes += size - previous;
+            }
+          } catch {
+            // fail-open
+          }
+        }
+
+        if (bytes < 0) bytes = 0;
+        cached.totalBytes = bytes;
       }
     } catch {
       // fail-open
+      this.sessionFootprintCache.delete(sessionKey);
     }
 
     return {
