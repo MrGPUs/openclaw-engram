@@ -163,9 +163,9 @@
           "required": ["maxBytes", "triggerDeltaBytes", "triggerDeltaTokens"]
         },
         "default": [
-          { "maxBytes": 50000, "triggerDeltaBytes": 6000, "triggerDeltaTokens": 1200 },
-          { "maxBytes": 200000, "triggerDeltaBytes": 12000, "triggerDeltaTokens": 2400 },
-          { "maxBytes": 1000000000, "triggerDeltaBytes": 24000, "triggerDeltaTokens": 4800 }
+          { "maxBytes": 50000, "triggerDeltaBytes": 4800, "triggerDeltaTokens": 1200 },
+          { "maxBytes": 200000, "triggerDeltaBytes": 9600, "triggerDeltaTokens": 2400 },
+          { "maxBytes": 1000000000, "triggerDeltaBytes": 19200, "triggerDeltaTokens": 4800 }
         ]
       },
       "injectQuestions": {
