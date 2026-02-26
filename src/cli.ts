@@ -134,6 +134,7 @@ export interface ReplayCliCommandOptions {
   defaultSessionKey?: string;
   strict?: boolean;
   runConsolidation?: boolean;
+  extractionIdleTimeoutMs?: number;
 }
 
 export interface ReplayCliOrchestrator {
@@ -146,6 +147,9 @@ export async function runReplayCliCommand(
   orchestrator: ReplayCliOrchestrator,
   options: ReplayCliCommandOptions,
 ): Promise<ReplayRunSummary> {
+  const extractionIdleTimeoutMs = Number.isFinite(options.extractionIdleTimeoutMs as number)
+    ? Math.max(1_000, Math.floor(options.extractionIdleTimeoutMs as number))
+    : 15 * 60_000;
   const inputRaw = await readFile(options.inputPath, "utf-8");
   const registry = buildReplayNormalizerRegistry([
     openclawReplayNormalizer,
@@ -169,6 +173,14 @@ export async function runReplayCliCommand(
         for (const turns of bySession.values()) {
           await orchestrator.ingestReplayBatch(turns);
         }
+        if (options.dryRun !== true) {
+          const becameIdle = await orchestrator.waitForExtractionIdle(extractionIdleTimeoutMs);
+          if (becameIdle === false) {
+            throw new Error(
+              `replay extraction queue did not become idle before timeout (${extractionIdleTimeoutMs}ms)`,
+            );
+          }
+        }
       },
     },
     {
@@ -184,9 +196,9 @@ export async function runReplayCliCommand(
   );
 
   if (!summary.dryRun) {
-    const becameIdle = await orchestrator.waitForExtractionIdle();
+    const becameIdle = await orchestrator.waitForExtractionIdle(extractionIdleTimeoutMs);
     if (becameIdle === false) {
-      throw new Error("replay extraction queue did not become idle before timeout");
+      throw new Error(`replay extraction queue did not become idle before timeout (${extractionIdleTimeoutMs}ms)`);
     }
     if (options.runConsolidation === true) {
       await orchestrator.runConsolidationNow();
@@ -498,6 +510,7 @@ export function registerCli(api: CliApi, orchestrator: Orchestrator): void {
         .option("--default-session-key <key>", "Fallback session key when source session identifiers are missing")
         .option("--strict", "Fail on invalid source rows")
         .option("--run-consolidation", "Run consolidation after replay ingestion completes")
+        .option("--idle-timeout-ms <n>", "Extraction idle timeout per replay batch/final drain in milliseconds", "900000")
         .action(async (...args: unknown[]) => {
           const options = (args[0] ?? {}) as Record<string, unknown>;
           const sourceRaw = typeof options.source === "string" ? options.source.trim().toLowerCase() : "";
@@ -514,6 +527,7 @@ export function registerCli(api: CliApi, orchestrator: Orchestrator): void {
           const startOffset = parseInt(String(options.startOffset ?? "0"), 10);
           const maxTurnsRaw = parseInt(String(options.maxTurns ?? "0"), 10);
           const batchSize = parseInt(String(options.batchSize ?? "100"), 10);
+          const idleTimeoutMs = parseInt(String(options.idleTimeoutMs ?? "900000"), 10);
           const summary = await runReplayCliCommand(orchestrator, {
             source: sourceRaw,
             inputPath,
@@ -529,6 +543,7 @@ export function registerCli(api: CliApi, orchestrator: Orchestrator): void {
                 : undefined,
             strict: options.strict === true,
             runConsolidation: options.runConsolidation === true,
+            extractionIdleTimeoutMs: Number.isFinite(idleTimeoutMs) && idleTimeoutMs > 0 ? idleTimeoutMs : 900_000,
           });
 
           console.log(`Replay source: ${summary.source}`);

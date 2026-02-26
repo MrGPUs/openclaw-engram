@@ -87,7 +87,7 @@ test("runReplayCliCommand enqueues batches and can run consolidation", async () 
   assert.equal(summary.dryRun, false);
   assert.equal(summary.processedTurns, 2);
   assert.deepEqual(ingested, [1, 1]);
-  assert.equal(waitCalls, 1);
+  assert.equal(waitCalls, 3);
   assert.equal(consolidationCalls, 1);
 });
 
@@ -117,11 +117,13 @@ test("runReplayCliCommand partitions mixed-session batches before ingest", async
   await writeFile(inputPath, raw, "utf-8");
 
   const sessionKeysByCall: string[][] = [];
+  let waitCalls = 0;
   const orchestrator: ReplayCliOrchestrator = {
     async ingestReplayBatch(turns) {
       sessionKeysByCall.push(Array.from(new Set(turns.map((turn) => turn.sessionKey))).sort());
     },
     async waitForExtractionIdle() {
+      waitCalls += 1;
       return true;
     },
     async runConsolidationNow() {
@@ -137,6 +139,7 @@ test("runReplayCliCommand partitions mixed-session batches before ingest", async
 
   assert.equal(summary.processedTurns, 3);
   assert.deepEqual(sessionKeysByCall, [["agent:a"], ["agent:b"]]);
+  assert.equal(waitCalls, 2);
 });
 
 test("runReplayCliCommand throws when extraction queue does not become idle", async () => {
