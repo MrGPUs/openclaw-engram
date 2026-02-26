@@ -1,0 +1,128 @@
+import type { MemoryCategory } from "../types.js";
+
+export type RoutePatternType = "regex" | "keyword";
+
+export interface RouteTarget {
+  category?: MemoryCategory;
+  namespace?: string;
+}
+
+export interface RouteRule {
+  id: string;
+  patternType: RoutePatternType;
+  pattern: string;
+  priority: number;
+  target: RouteTarget;
+  enabled?: boolean;
+}
+
+export interface RoutingEngineOptions {
+  allowedNamespaces?: string[];
+  allowedCategories?: MemoryCategory[];
+}
+
+export interface RouteSelection {
+  rule: RouteRule;
+  target: RouteTarget;
+}
+
+const DEFAULT_CATEGORIES: readonly MemoryCategory[] = [
+  "fact",
+  "preference",
+  "correction",
+  "entity",
+  "decision",
+  "relationship",
+  "principle",
+  "commitment",
+  "moment",
+  "skill",
+] as const;
+
+function normalizeNamespace(namespace: string): string {
+  return namespace.trim();
+}
+
+export function isSafeRouteNamespace(namespace: string): boolean {
+  const value = normalizeNamespace(namespace);
+  if (value.length === 0) return false;
+  if (value.includes("/") || value.includes("\\")) return false;
+  if (value.includes("..")) return false;
+  return /^[A-Za-z0-9._-]{1,64}$/.test(value);
+}
+
+export function validateRouteTarget(target: RouteTarget, options?: RoutingEngineOptions): {
+  ok: boolean;
+  error?: string;
+  target?: RouteTarget;
+} {
+  const allowedCategories = new Set(options?.allowedCategories ?? DEFAULT_CATEGORIES);
+  const allowedNamespaces = options?.allowedNamespaces
+    ? new Set(options.allowedNamespaces.map((v) => v.trim()).filter((v) => v.length > 0))
+    : null;
+
+  const normalized: RouteTarget = {};
+
+  if (typeof target.category === "string") {
+    if (!allowedCategories.has(target.category)) {
+      return { ok: false, error: `invalid category: ${target.category}` };
+    }
+    normalized.category = target.category;
+  }
+
+  if (typeof target.namespace === "string") {
+    const namespace = normalizeNamespace(target.namespace);
+    if (!isSafeRouteNamespace(namespace)) {
+      return { ok: false, error: `invalid namespace: ${target.namespace}` };
+    }
+    if (allowedNamespaces && !allowedNamespaces.has(namespace)) {
+      return { ok: false, error: `namespace not allowed: ${namespace}` };
+    }
+    normalized.namespace = namespace;
+  }
+
+  if (!normalized.category && !normalized.namespace) {
+    return { ok: false, error: "target must include category or namespace" };
+  }
+
+  return { ok: true, target: normalized };
+}
+
+export function doesRuleMatch(rule: RouteRule, text: string): boolean {
+  if (rule.enabled === false) return false;
+  const pattern = rule.pattern.trim();
+  if (pattern.length === 0) return false;
+
+  if (rule.patternType === "keyword") {
+    return text.toLowerCase().includes(pattern.toLowerCase());
+  }
+
+  try {
+    return new RegExp(pattern, "i").test(text);
+  } catch {
+    return false;
+  }
+}
+
+export function selectRouteRule(text: string, rules: RouteRule[], options?: RoutingEngineOptions): RouteSelection | null {
+  const ranked = rules
+    .map((rule, index) => ({ rule, index }))
+    .sort((a, b) => {
+      if (b.rule.priority !== a.rule.priority) return b.rule.priority - a.rule.priority;
+      return a.index - b.index;
+    });
+
+  for (const entry of ranked) {
+    if (!doesRuleMatch(entry.rule, text)) continue;
+
+    const validation = validateRouteTarget(entry.rule.target, options);
+    if (!validation.ok || !validation.target) continue;
+
+    return {
+      rule: entry.rule,
+      target: validation.target,
+    };
+  }
+
+  return null;
+}
