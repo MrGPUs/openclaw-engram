@@ -121,13 +121,8 @@ export class RoutingRulesStore {
   async reset(): Promise<void> {
     await this.withWriteLock(async () => {
       const payload = defaultState();
-      try {
-        await this.assertStatePathScoped();
-        await mkdir(path.dirname(this.statePath), { recursive: true });
-        await writeFile(this.statePath, JSON.stringify(payload, null, 2), "utf-8");
-      } catch (err) {
-        log.debug(`routing rules reset failed: ${err}`);
-      }
+      await this.assertStatePathScoped();
+      await writeFile(this.statePath, JSON.stringify(payload, null, 2), "utf-8");
     });
   }
 
@@ -173,8 +168,10 @@ export class RoutingRulesStore {
       await writeFile(tmpPath, JSON.stringify(payload, null, 2), "utf-8");
       await rename(tmpPath, this.statePath);
     } catch (err) {
-      await rm(tmpPath, { force: true }).catch(() => {});
       log.debug(`routing rules write failed: ${err}`);
+      throw err;
+    } finally {
+      await rm(tmpPath, { force: true }).catch(() => {});
     }
 
     return normalized;
