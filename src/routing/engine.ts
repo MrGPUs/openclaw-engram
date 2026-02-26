@@ -43,6 +43,16 @@ function normalizeNamespace(namespace: string): string {
   return namespace.trim();
 }
 
+export function isLikelyUnsafeRegex(pattern: string): boolean {
+  const value = pattern.trim();
+  if (value.length === 0) return true;
+  if (value.length > 120) return true;
+  if (/\\[1-9]/.test(value)) return true; // backreferences
+  if (/\(\?<?[=!]/.test(value)) return true; // lookaround assertions
+  if (/\((?:[^()\\]|\\.)*[+*](?:[^()\\]|\\.)*\)[+*{]/.test(value)) return true; // nested quantifiers
+  return false;
+}
+
 export function isSafeRouteNamespace(namespace: string): boolean {
   const value = normalizeNamespace(namespace);
   if (value.length === 0) return false;
@@ -96,6 +106,10 @@ export function doesRuleMatch(rule: RouteRule, text: string): boolean {
 
   if (rule.patternType === "keyword") {
     return text.toLowerCase().includes(pattern.toLowerCase());
+  }
+
+  if (isLikelyUnsafeRegex(pattern)) {
+    return false;
   }
 
   try {

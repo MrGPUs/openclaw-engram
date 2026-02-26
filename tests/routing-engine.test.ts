@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   doesRuleMatch,
   isSafeRouteNamespace,
+  isLikelyUnsafeRegex,
   selectRouteRule,
   validateRouteTarget,
   type RouteRule,
@@ -36,6 +37,13 @@ test("doesRuleMatch supports regex matching", () => {
 test("doesRuleMatch fail-opens for invalid regex", () => {
   assert.equal(
     doesRuleMatch(rule({ patternType: "regex", pattern: "(" }), "text"),
+    false,
+  );
+});
+
+test("doesRuleMatch rejects potentially catastrophic regex patterns", () => {
+  assert.equal(
+    doesRuleMatch(rule({ patternType: "regex", pattern: "(a+)+$" }), "aaaaaaaaaaaaaaaaaaaaX"),
     false,
   );
 });
@@ -86,4 +94,10 @@ test("isSafeRouteNamespace rejects traversal and path separators", () => {
   assert.equal(isSafeRouteNamespace("../default"), false);
   assert.equal(isSafeRouteNamespace("ops/team"), false);
   assert.equal(isSafeRouteNamespace("ops\\team"), false);
+});
+
+test("isLikelyUnsafeRegex flags high-risk constructs", () => {
+  assert.equal(isLikelyUnsafeRegex("(a+)+$"), true);
+  assert.equal(isLikelyUnsafeRegex("(\\w+)\\1"), true);
+  assert.equal(isLikelyUnsafeRegex("outage\\s+in"), false);
 });
