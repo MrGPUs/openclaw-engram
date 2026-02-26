@@ -198,6 +198,7 @@ export class RoutingRulesStore {
     const start = Date.now();
     const staleMs = 30_000;
     const timeoutMs = 5_000;
+    let unexpectedLockError: unknown = null;
     await this.assertStatePathScoped();
     await mkdir(path.dirname(this.lockPath), { recursive: true });
 
@@ -214,6 +215,7 @@ export class RoutingRulesStore {
       } catch (err) {
         const code = (err as NodeJS.ErrnoException).code;
         if (code !== "EEXIST") {
+          unexpectedLockError = err;
           break;
         }
         try {
@@ -229,6 +231,9 @@ export class RoutingRulesStore {
       }
     }
 
+    if (unexpectedLockError) {
+      throw unexpectedLockError;
+    }
     throw new Error(`routing rules lock acquisition timed out after ${timeoutMs}ms`);
   }
 
