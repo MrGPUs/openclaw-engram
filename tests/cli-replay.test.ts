@@ -188,7 +188,7 @@ test("runReplayCliCommand throws when replay batch processing exceeds timeout", 
 
   const orchestrator: ReplayCliOrchestrator = {
     async ingestReplayBatch() {
-      await new Promise<void>(() => {});
+      await new Promise<void>((resolve) => setTimeout(resolve, 1_100));
     },
     async waitForConsolidationIdle() {
       return true;
