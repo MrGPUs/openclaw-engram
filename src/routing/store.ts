@@ -108,7 +108,7 @@ export class RoutingRulesStore {
     });
   }
 
-  async removeByPattern(pattern: string, options?: RoutingEngineOptions): Promise<RouteRule[]> {
+  async removeByPattern(pattern: string): Promise<RouteRule[]> {
     return this.withWriteLock(async () => {
       const trimmed = pattern.trim();
       const existing = await this.readPersistedRules();
