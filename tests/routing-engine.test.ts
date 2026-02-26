@@ -82,6 +82,7 @@ test("validateRouteTarget enforces allowed namespaces and categories", () => {
 test("isSafeRouteNamespace rejects traversal and path separators", () => {
   assert.equal(isSafeRouteNamespace("default"), true);
   assert.equal(isSafeRouteNamespace("team.alpha-1"), true);
+  assert.equal(isSafeRouteNamespace("."), false);
   assert.equal(isSafeRouteNamespace("../default"), false);
   assert.equal(isSafeRouteNamespace("ops/team"), false);
   assert.equal(isSafeRouteNamespace("ops\\team"), false);

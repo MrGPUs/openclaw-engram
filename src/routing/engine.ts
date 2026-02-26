@@ -46,6 +46,7 @@ function normalizeNamespace(namespace: string): string {
 export function isSafeRouteNamespace(namespace: string): boolean {
   const value = normalizeNamespace(namespace);
   if (value.length === 0) return false;
+  if (value === ".") return false;
   if (value.includes("/") || value.includes("\\")) return false;
   if (value.includes("..")) return false;
   return /^[A-Za-z0-9._-]{1,64}$/.test(value);
