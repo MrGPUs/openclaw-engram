@@ -2449,12 +2449,9 @@ export class Orchestrator {
 
     const userTurns = normalizedTurns.filter((t) => t.role === "user");
     const totalChars = normalizedTurns.reduce((sum, t) => sum + t.content.length, 0);
-    if (
-      !skipMinimumThresholds &&
-      totalChars < this.config.extractionMinChars ||
-      !skipMinimumThresholds &&
-      userTurns.length < this.config.extractionMinUserTurns
-    ) {
+    const belowCharThreshold = totalChars < this.config.extractionMinChars;
+    const belowUserTurnThreshold = userTurns.length < this.config.extractionMinUserTurns;
+    if ((!skipMinimumThresholds && belowCharThreshold) || belowUserTurnThreshold) {
       log.debug(
         `skipping extraction: below threshold (totalChars=${totalChars}, userTurns=${userTurns.length})`,
       );

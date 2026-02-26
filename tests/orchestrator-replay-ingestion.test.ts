@@ -23,7 +23,7 @@ test("queueBufferedExtraction preserves explicit false clearBufferAfterExtractio
   );
 });
 
-test("runExtraction only applies minimum thresholds when enabled", () => {
+test("runExtraction bypass only skips char threshold and still enforces user-turn threshold", () => {
   const source = readFileSync(resolve(import.meta.dirname, "..", "src", "orchestrator.ts"), "utf-8");
 
   assert.match(
@@ -33,7 +33,12 @@ test("runExtraction only applies minimum thresholds when enabled", () => {
   );
   assert.match(
     source,
-    /if \(\s*!skipMinimumThresholds[\s\S]*totalChars < this\.config\.extractionMinChars[\s\S]*!skipMinimumThresholds[\s\S]*userTurns\.length < this\.config\.extractionMinUserTurns/m,
-    "minimum thresholds should be gated by skipMinimumThresholds",
+    /const belowCharThreshold = totalChars < this\.config\.extractionMinChars;\s*const belowUserTurnThreshold = userTurns\.length < this\.config\.extractionMinUserTurns;/m,
+    "runExtraction should compute char and user-turn minimums independently",
+  );
+  assert.match(
+    source,
+    /if \(\(!skipMinimumThresholds && belowCharThreshold\) \|\| belowUserTurnThreshold\)/m,
+    "user-turn threshold should always be enforced, even when char threshold bypass is enabled",
   );
 });
