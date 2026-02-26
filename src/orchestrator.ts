@@ -2277,13 +2277,22 @@ export class Orchestrator {
       bySession.set(key, list);
     }
 
+    const replayTasks: Array<Promise<void>> = [];
     for (const sessionTurns of bySession.values()) {
       if (sessionTurns.length === 0) continue;
-      await this.queueBufferedExtraction(sessionTurns, "trigger_mode", {
-        skipDedupeCheck: true,
-        clearBufferAfterExtraction: false,
-        skipMinimumThresholds: true,
-      });
+      replayTasks.push(
+        new Promise<void>((resolve, reject) => {
+          void this.queueBufferedExtraction(sessionTurns, "trigger_mode", {
+            skipDedupeCheck: true,
+            clearBufferAfterExtraction: false,
+            skipMinimumThresholds: true,
+            onTaskSettled: (err) => (err ? reject(err) : resolve()),
+          }).catch(reject);
+        }),
+      );
+    }
+    if (replayTasks.length > 0) {
+      await Promise.all(replayTasks);
     }
   }
 
@@ -2336,6 +2345,7 @@ export class Orchestrator {
       skipDedupeCheck?: boolean;
       clearBufferAfterExtraction?: boolean;
       skipMinimumThresholds?: boolean;
+      onTaskSettled?: (error?: unknown) => void;
     } = {},
   ): Promise<void> {
     if (!options.skipDedupeCheck && !this.shouldQueueExtraction(turnsToExtract)) {
@@ -2344,10 +2354,16 @@ export class Orchestrator {
     }
 
     this.extractionQueue.push(async () => {
-      await this.runExtraction(turnsToExtract, {
-        clearBufferAfterExtraction: options.clearBufferAfterExtraction ?? true,
-        skipMinimumThresholds: options.skipMinimumThresholds ?? false,
-      });
+      try {
+        await this.runExtraction(turnsToExtract, {
+          clearBufferAfterExtraction: options.clearBufferAfterExtraction ?? true,
+          skipMinimumThresholds: options.skipMinimumThresholds ?? false,
+        });
+        options.onTaskSettled?.();
+      } catch (err) {
+        options.onTaskSettled?.(err);
+        throw err;
+      }
     });
 
     if (!this.queueProcessing) {

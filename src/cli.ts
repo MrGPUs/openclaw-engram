@@ -139,9 +139,26 @@ export interface ReplayCliCommandOptions {
 
 export interface ReplayCliOrchestrator {
   ingestReplayBatch(turns: ReplayTurn[]): Promise<void>;
-  waitForExtractionIdle(timeoutMs?: number): Promise<boolean | void>;
   waitForConsolidationIdle(timeoutMs?: number): Promise<boolean | void>;
   runConsolidationNow(): Promise<{ memoriesProcessed: number; merged: number; invalidated: number }>;
+}
+
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  timeoutMessage: string,
+): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(timeoutMessage)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 export async function runReplayCliCommand(
@@ -175,15 +192,11 @@ export async function runReplayCliCommand(
           bySession.set(key, turns);
         }
         for (const turns of bySession.values()) {
-          await orchestrator.ingestReplayBatch(turns);
-        }
-        if (options.dryRun !== true) {
-          const becameIdle = await orchestrator.waitForExtractionIdle(extractionIdleTimeoutMs);
-          if (becameIdle === false) {
-            throw new Error(
-              `replay extraction queue did not become idle before timeout (${extractionIdleTimeoutMs}ms)`,
-            );
-          }
+          await withTimeout(
+            orchestrator.ingestReplayBatch(turns),
+            extractionIdleTimeoutMs,
+            `replay extraction batch did not complete before timeout (${extractionIdleTimeoutMs}ms)`,
+          );
         }
       },
     },
@@ -200,10 +213,6 @@ export async function runReplayCliCommand(
   );
 
   if (!summary.dryRun) {
-    const becameIdle = await orchestrator.waitForExtractionIdle(extractionIdleTimeoutMs);
-    if (becameIdle === false) {
-      throw new Error(`replay extraction queue did not become idle before timeout (${extractionIdleTimeoutMs}ms)`);
-    }
     if (options.runConsolidation === true) {
       const consolidationIdle = await orchestrator.waitForConsolidationIdle(extractionIdleTimeoutMs);
       if (consolidationIdle === false) {

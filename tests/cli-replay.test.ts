@@ -34,9 +34,6 @@ test("runReplayCliCommand dry-run parses but does not enqueue extraction", async
     async ingestReplayBatch() {
       ingestCalls += 1;
     },
-    async waitForExtractionIdle() {
-      waitCalls += 1;
-    },
     async waitForConsolidationIdle() {
       waitCalls += 1;
     },
@@ -71,9 +68,6 @@ test("runReplayCliCommand enqueues batches and can run consolidation", async () 
     async ingestReplayBatch(turns) {
       ingested.push(turns.length);
     },
-    async waitForExtractionIdle() {
-      waitCalls += 1;
-    },
     async waitForConsolidationIdle() {
       waitCalls += 1;
     },
@@ -93,7 +87,7 @@ test("runReplayCliCommand enqueues batches and can run consolidation", async () 
   assert.equal(summary.dryRun, false);
   assert.equal(summary.processedTurns, 2);
   assert.deepEqual(ingested, [1, 1]);
-  assert.equal(waitCalls, 4);
+  assert.equal(waitCalls, 1);
   assert.equal(consolidationCalls, 1);
 });
 
@@ -123,17 +117,11 @@ test("runReplayCliCommand partitions mixed-session batches before ingest", async
   await writeFile(inputPath, raw, "utf-8");
 
   const sessionKeysByCall: string[][] = [];
-  let waitCalls = 0;
   const orchestrator: ReplayCliOrchestrator = {
     async ingestReplayBatch(turns) {
       sessionKeysByCall.push(Array.from(new Set(turns.map((turn) => turn.sessionKey))).sort());
     },
-    async waitForExtractionIdle() {
-      waitCalls += 1;
-      return true;
-    },
     async waitForConsolidationIdle() {
-      waitCalls += 1;
       return true;
     },
     async runConsolidationNow() {
@@ -149,7 +137,6 @@ test("runReplayCliCommand partitions mixed-session batches before ingest", async
 
   assert.equal(summary.processedTurns, 3);
   assert.deepEqual(sessionKeysByCall, [["agent:a"], ["agent:b"]]);
-  assert.equal(waitCalls, 2);
 });
 
 test("runReplayCliCommand handles normalized fallback session keys safely", async () => {
@@ -176,9 +163,6 @@ test("runReplayCliCommand handles normalized fallback session keys safely", asyn
     async ingestReplayBatch(turns) {
       sessionKeysByCall.push(Array.from(new Set(turns.map((turn) => turn.sessionKey))).sort());
     },
-    async waitForExtractionIdle() {
-      return true;
-    },
     async waitForConsolidationIdle() {
       return true;
     },
@@ -197,15 +181,14 @@ test("runReplayCliCommand handles normalized fallback session keys safely", asyn
   assert.deepEqual(sessionKeysByCall, [["replay:openclaw:import"]]);
 });
 
-test("runReplayCliCommand throws when extraction queue does not become idle", async () => {
+test("runReplayCliCommand throws when replay batch processing exceeds timeout", async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), "engram-cli-replay-timeout-"));
   const inputPath = path.join(dir, "replay.jsonl");
   await writeFile(inputPath, openclawJsonlSample(), "utf-8");
 
   const orchestrator: ReplayCliOrchestrator = {
-    async ingestReplayBatch() {},
-    async waitForExtractionIdle() {
-      return false;
+    async ingestReplayBatch() {
+      await new Promise<void>(() => {});
     },
     async waitForConsolidationIdle() {
       return true;
@@ -220,8 +203,9 @@ test("runReplayCliCommand throws when extraction queue does not become idle", as
       runReplayCliCommand(orchestrator, {
         source: "openclaw",
         inputPath,
+        extractionIdleTimeoutMs: 1_000,
       }),
-    /did not become idle before timeout/,
+    /batch did not complete before timeout/,
   );
 });
 
@@ -233,9 +217,6 @@ test("runReplayCliCommand throws when consolidation remains in-flight before fin
   let consolidationCalls = 0;
   const orchestrator: ReplayCliOrchestrator = {
     async ingestReplayBatch() {},
-    async waitForExtractionIdle() {
-      return true;
-    },
     async waitForConsolidationIdle() {
       return false;
     },
