@@ -47,6 +47,7 @@ import {
   extractTagsFromPrompt,
 } from "./temporal-index.js";
 import { GraphIndex } from "./graph.js";
+import { normalizeReplaySessionKey, type ReplayTurn } from "./replay/types.js";
 import type { MemorySummary } from "./types.js";
 import { chunkTranscriptEntries } from "./conversation-index/chunker.js";
 import { writeConversationChunks } from "./conversation-index/indexer.js";
@@ -897,15 +898,28 @@ export class Orchestrator {
     return this.runConsolidation();
   }
 
-  async waitForExtractionIdle(timeoutMs: number = 60_000): Promise<void> {
+  async waitForExtractionIdle(timeoutMs: number = 60_000): Promise<boolean> {
     const started = Date.now();
     while (this.queueProcessing || this.extractionQueue.length > 0) {
       if (Date.now() - started > timeoutMs) {
         log.warn(`waitForExtractionIdle timed out after ${timeoutMs}ms`);
-        return;
+        return false;
       }
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
+    return true;
+  }
+
+  async waitForConsolidationIdle(timeoutMs: number = 60_000): Promise<boolean> {
+    const started = Date.now();
+    while (this.consolidationInFlight) {
+      if (Date.now() - started > timeoutMs) {
+        log.warn(`waitForConsolidationIdle timed out after ${timeoutMs}ms`);
+        return false;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    return true;
   }
 
   async getStorage(namespace?: string): Promise<StorageManager> {
@@ -2244,6 +2258,52 @@ export class Orchestrator {
     await this.queueBufferedExtraction(this.buffer.getTurns(), "trigger_mode");
   }
 
+  async ingestReplayBatch(
+    turns: ReplayTurn[],
+    options: { deadlineMs?: number } = {},
+  ): Promise<void> {
+    if (!Array.isArray(turns) || turns.length === 0) return;
+
+    const bySession = new Map<string, BufferTurn[]>();
+    for (const turn of turns) {
+      if (turn.role !== "user" && turn.role !== "assistant") continue;
+      const key = normalizeReplaySessionKey(turn.sessionKey);
+      const list = bySession.get(key) ?? [];
+      list.push({
+        role: turn.role,
+        content: turn.content,
+        timestamp: turn.timestamp,
+        sessionKey: key,
+      });
+      bySession.set(key, list);
+    }
+
+    const replayTasks: Array<Promise<void>> = [];
+    for (const sessionTurns of bySession.values()) {
+      if (sessionTurns.length === 0) continue;
+      replayTasks.push(
+        new Promise<void>((resolve, reject) => {
+          void this.queueBufferedExtraction(sessionTurns, "trigger_mode", {
+            skipDedupeCheck: true,
+            clearBufferAfterExtraction: false,
+            skipCharThreshold: true,
+            extractionDeadlineMs: options.deadlineMs,
+            onTaskSettled: (err) => (err ? reject(err) : resolve()),
+          }).catch(reject);
+        }),
+      );
+    }
+    if (replayTasks.length > 0) {
+      const settled = await Promise.allSettled(replayTasks);
+      const firstRejected = settled.find(
+        (result): result is PromiseRejectedResult => result.status === "rejected",
+      );
+      if (firstRejected) {
+        throw firstRejected.reason;
+      }
+    }
+  }
+
   async observeSessionHeartbeat(sessionKey: string): Promise<void> {
     if (this.config.sessionObserverEnabled !== true) return;
     if (!sessionKey || sessionKey.length === 0) return;
@@ -2289,15 +2349,32 @@ export class Orchestrator {
   private async queueBufferedExtraction(
     turnsToExtract: BufferTurn[],
     reason: "trigger_mode" | "heartbeat_observer",
-    options: { skipDedupeCheck?: boolean } = {},
+    options: {
+      skipDedupeCheck?: boolean;
+      clearBufferAfterExtraction?: boolean;
+      skipCharThreshold?: boolean;
+      extractionDeadlineMs?: number;
+      onTaskSettled?: (error?: unknown) => void;
+    } = {},
   ): Promise<void> {
     if (!options.skipDedupeCheck && !this.shouldQueueExtraction(turnsToExtract)) {
       log.debug(`extraction dedupe skip: preserving buffer (${reason})`);
+      options.onTaskSettled?.();
       return;
     }
 
     this.extractionQueue.push(async () => {
-      await this.runExtraction(turnsToExtract);
+      try {
+        await this.runExtraction(turnsToExtract, {
+          clearBufferAfterExtraction: options.clearBufferAfterExtraction ?? true,
+          skipCharThreshold: options.skipCharThreshold ?? false,
+          deadlineMs: options.extractionDeadlineMs,
+        });
+        options.onTaskSettled?.();
+      } catch (err) {
+        options.onTaskSettled?.(err);
+        throw err;
+      }
     });
 
     if (!this.queueProcessing) {
@@ -2368,14 +2445,37 @@ export class Orchestrator {
     this.queueProcessing = false;
   }
 
-  private async runExtraction(turns: BufferTurn[]): Promise<void> {
+  private async runExtraction(
+    turns: BufferTurn[],
+    options: {
+      clearBufferAfterExtraction?: boolean;
+      skipCharThreshold?: boolean;
+      deadlineMs?: number;
+    } = {},
+  ): Promise<void> {
     log.debug(`running extraction on ${turns.length} turns`);
+    const clearBufferAfterExtraction = options.clearBufferAfterExtraction ?? true;
+    const skipCharThreshold = options.skipCharThreshold ?? false;
+    const deadlineMs =
+      typeof options.deadlineMs === "number" && Number.isFinite(options.deadlineMs)
+        ? options.deadlineMs
+        : undefined;
+    const throwIfDeadlineExceeded = (stage: string): void => {
+      if (typeof deadlineMs === "number" && Date.now() > deadlineMs) {
+        throw new Error(`replay extraction deadline exceeded (${stage})`);
+      }
+    };
+    const clearBuffer = async () => {
+      if (clearBufferAfterExtraction) {
+        await this.buffer.clearAfterExtraction();
+      }
+    };
 
     // Skip extraction for cron job sessions - these are system operations, not user conversations
     const sessionKey = turns[0]?.sessionKey ?? "";
     if (sessionKey.includes(":cron:")) {
       log.debug(`skipping extraction for cron session: ${sessionKey}`);
-      await this.buffer.clearAfterExtraction();
+      await clearBuffer();
       return;
     }
 
@@ -2386,17 +2486,17 @@ export class Orchestrator {
         content: t.content.trim().slice(0, this.config.extractionMaxTurnChars),
       }))
       .filter((t) => t.content.length > 0);
+    throwIfDeadlineExceeded("before_extract");
 
     const userTurns = normalizedTurns.filter((t) => t.role === "user");
     const totalChars = normalizedTurns.reduce((sum, t) => sum + t.content.length, 0);
-    if (
-      totalChars < this.config.extractionMinChars ||
-      userTurns.length < this.config.extractionMinUserTurns
-    ) {
+    const belowCharThreshold = totalChars < this.config.extractionMinChars;
+    const belowUserTurnThreshold = userTurns.length < this.config.extractionMinUserTurns;
+    if ((!skipCharThreshold && belowCharThreshold) || belowUserTurnThreshold) {
       log.debug(
         `skipping extraction: below threshold (totalChars=${totalChars}, userTurns=${userTurns.length})`,
       );
-      await this.buffer.clearAfterExtraction();
+      await clearBuffer();
       return;
     }
 
@@ -2407,16 +2507,17 @@ export class Orchestrator {
     // Pass existing entity names so the LLM can reuse them instead of inventing variants
     const existingEntities = await storage.listEntityNames();
     const result = await this.extraction.extract(normalizedTurns, existingEntities);
+    throwIfDeadlineExceeded("before_persist");
 
     // Defensive: validate extraction result before processing
     if (!result) {
       log.warn("runExtraction: extraction returned null/undefined");
-      await this.buffer.clearAfterExtraction();
+      await clearBuffer();
       return;
     }
     if (!Array.isArray(result.facts)) {
       log.warn("runExtraction: extraction returned invalid facts (not an array)", { factsType: typeof result.facts, resultKeys: Object.keys(result) });
-      await this.buffer.clearAfterExtraction();
+      await clearBuffer();
       return;
     }
     if (
@@ -2426,7 +2527,7 @@ export class Orchestrator {
       result.profileUpdates.length === 0
     ) {
       log.debug("runExtraction: extraction produced no durable outputs; skipping persistence");
-      await this.buffer.clearAfterExtraction();
+      await clearBuffer();
       return;
     }
 
@@ -2442,7 +2543,7 @@ export class Orchestrator {
     }
 
     const persistedIds = await this.persistExtraction(result, storage, threadIdForExtraction);
-    await this.buffer.clearAfterExtraction();
+    await clearBuffer();
 
     // Build memory box from this extraction (v8.0 Phase 2A)
     // Topics are derived from the current extraction's facts and entities only —

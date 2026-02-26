@@ -11,6 +11,11 @@ import { importJsonBundle } from "./transfer/import-json.js";
 import { importSqlite } from "./transfer/import-sqlite.js";
 import { importMarkdownBundle } from "./transfer/import-md.js";
 import { detectImportFormat } from "./transfer/autodetect.js";
+import { buildReplayNormalizerRegistry, clampBatchSize, runReplay, type ReplayRunSummary } from "./replay/runner.js";
+import { chatgptReplayNormalizer } from "./replay/normalizers/chatgpt.js";
+import { claudeReplayNormalizer } from "./replay/normalizers/claude.js";
+import { openclawReplayNormalizer } from "./replay/normalizers/openclaw.js";
+import { isReplaySource, normalizeReplaySessionKey, type ReplaySource, type ReplayTurn } from "./replay/types.js";
 
 interface CliApi {
   registerCli(
@@ -115,6 +120,121 @@ export function planExactDuplicateDeletions(memories: DedupeCandidate[]): ExactD
 
 export function planAggressiveDuplicateDeletions(memories: DedupeCandidate[]): ExactDedupePlan {
   return buildDedupePlan(memories, (memory) => normalizeAggressiveBody(memory.content));
+}
+
+export interface ReplayCliCommandOptions {
+  source: ReplaySource;
+  inputPath: string;
+  from?: string;
+  to?: string;
+  dryRun?: boolean;
+  startOffset?: number;
+  maxTurns?: number;
+  batchSize?: number;
+  defaultSessionKey?: string;
+  strict?: boolean;
+  runConsolidation?: boolean;
+  extractionIdleTimeoutMs?: number;
+}
+
+export interface ReplayCliOrchestrator {
+  ingestReplayBatch(
+    turns: ReplayTurn[],
+    options?: { deadlineMs?: number },
+  ): Promise<void>;
+  waitForConsolidationIdle(timeoutMs?: number): Promise<boolean>;
+  runConsolidationNow(): Promise<{ memoriesProcessed: number; merged: number; invalidated: number }>;
+}
+
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  timeoutMessage: string,
+): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(timeoutMessage)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+export async function runReplayCliCommand(
+  orchestrator: ReplayCliOrchestrator,
+  options: ReplayCliCommandOptions,
+): Promise<ReplayRunSummary> {
+  const extractionIdleTimeoutMs = Number.isFinite(options.extractionIdleTimeoutMs as number)
+    ? Math.max(1_000, Math.floor(options.extractionIdleTimeoutMs as number))
+    : 15 * 60_000;
+  const inputRaw = await readFile(options.inputPath, "utf-8");
+  const registry = buildReplayNormalizerRegistry([
+    openclawReplayNormalizer,
+    claudeReplayNormalizer,
+    chatgptReplayNormalizer,
+  ]);
+  const ingestBatchSize = clampBatchSize(options.batchSize);
+  const turnsBySession = new Map<string, ReplayTurn[]>();
+  const ingestSessionChunk = async (sessionTurns: ReplayTurn[]): Promise<void> => {
+    const deadlineMs = Date.now() + extractionIdleTimeoutMs;
+    await withTimeout(
+      orchestrator.ingestReplayBatch(sessionTurns, { deadlineMs }),
+      extractionIdleTimeoutMs,
+      `replay extraction batch did not complete before timeout (${extractionIdleTimeoutMs}ms)`,
+    );
+  };
+
+  const summary = await runReplay(
+    options.source,
+    inputRaw,
+    registry,
+    {
+      onBatch: async (batch) => {
+        for (const turn of batch) {
+          const key = normalizeReplaySessionKey(turn.sessionKey);
+          const turns = turnsBySession.get(key) ?? [];
+          turns.push(turn);
+          turnsBySession.set(key, turns);
+          while (turns.length >= ingestBatchSize) {
+            const chunk = turns.splice(0, ingestBatchSize);
+            await ingestSessionChunk(chunk);
+          }
+        }
+      },
+    },
+    {
+      from: options.from,
+      to: options.to,
+      dryRun: options.dryRun === true,
+      startOffset: options.startOffset,
+      maxTurns: options.maxTurns,
+      batchSize: options.batchSize,
+      defaultSessionKey: options.defaultSessionKey,
+      strict: options.strict,
+    },
+  );
+
+  if (!summary.dryRun) {
+    for (const turns of turnsBySession.values()) {
+      if (turns.length === 0) continue;
+      await ingestSessionChunk(turns);
+    }
+    if (options.runConsolidation === true) {
+      const consolidationIdle = await orchestrator.waitForConsolidationIdle(extractionIdleTimeoutMs);
+      if (!consolidationIdle) {
+        throw new Error(
+          `replay consolidation did not become idle before timeout (${extractionIdleTimeoutMs}ms)`,
+        );
+      }
+      await orchestrator.runConsolidationNow();
+    }
+  }
+
+  return summary;
 }
 
 async function getPluginVersion(): Promise<string> {
@@ -402,6 +522,81 @@ export function registerCli(api: CliApi, orchestrator: Orchestrator): void {
             includeTranscripts,
             pluginVersion,
           });
+          console.log("OK");
+        });
+
+      cmd
+        .command("replay")
+        .description("Import replay transcripts from external exports")
+        .option("--source <source>", "Replay source: openclaw|claude|chatgpt")
+        .option("--input <path>", "Path to replay export file")
+        .option("--from <iso>", "Inclusive lower bound timestamp (ISO UTC)")
+        .option("--to <iso>", "Inclusive upper bound timestamp (ISO UTC)")
+        .option("--dry-run", "Parse and validate only; do not enqueue extraction")
+        .option("--start-offset <n>", "Start replay at offset", "0")
+        .option("--max-turns <n>", "Maximum turns to process", "0")
+        .option("--batch-size <n>", "Replay ingestion batch size", "100")
+        .option("--default-session-key <key>", "Fallback session key when source session identifiers are missing")
+        .option("--strict", "Fail on invalid source rows")
+        .option("--run-consolidation", "Run consolidation after replay ingestion completes")
+        .option("--idle-timeout-ms <n>", "Extraction idle timeout per replay batch/final drain in milliseconds", "900000")
+        .action(async (...args: unknown[]) => {
+          const options = (args[0] ?? {}) as Record<string, unknown>;
+          const sourceRaw = typeof options.source === "string" ? options.source.trim().toLowerCase() : "";
+          const inputPath = typeof options.input === "string" ? options.input.trim() : "";
+          if (!isReplaySource(sourceRaw)) {
+            console.log("Missing or invalid --source. Use one of: openclaw, claude, chatgpt.");
+            return;
+          }
+          if (inputPath.length === 0) {
+            console.log("Missing --input. Example: openclaw engram replay --source openclaw --input /tmp/replay.jsonl");
+            return;
+          }
+
+          const startOffset = parseInt(String(options.startOffset ?? "0"), 10);
+          const maxTurnsRaw = parseInt(String(options.maxTurns ?? "0"), 10);
+          const batchSize = parseInt(String(options.batchSize ?? "100"), 10);
+          const idleTimeoutMs = parseInt(String(options.idleTimeoutMs ?? "900000"), 10);
+          const summary = await runReplayCliCommand(orchestrator, {
+            source: sourceRaw,
+            inputPath,
+            from: typeof options.from === "string" ? options.from : undefined,
+            to: typeof options.to === "string" ? options.to : undefined,
+            dryRun: options.dryRun === true,
+            startOffset: Number.isFinite(startOffset) ? Math.max(0, startOffset) : 0,
+            maxTurns: Number.isFinite(maxTurnsRaw) && maxTurnsRaw > 0 ? maxTurnsRaw : undefined,
+            batchSize: Number.isFinite(batchSize) && batchSize > 0 ? batchSize : 100,
+            defaultSessionKey:
+              typeof options.defaultSessionKey === "string" && options.defaultSessionKey.trim().length > 0
+                ? options.defaultSessionKey.trim()
+                : undefined,
+            strict: options.strict === true,
+            runConsolidation: options.runConsolidation === true,
+            extractionIdleTimeoutMs: Number.isFinite(idleTimeoutMs) && idleTimeoutMs > 0 ? idleTimeoutMs : 900_000,
+          });
+
+          console.log(`Replay source: ${summary.source}`);
+          console.log(`Parsed turns: ${summary.parsedTurns}`);
+          console.log(`Valid turns: ${summary.validTurns}`);
+          console.log(`Invalid turns: ${summary.invalidTurns}`);
+          console.log(`Filtered by date: ${summary.filteredByDate}`);
+          console.log(`Skipped by offset: ${summary.skippedByOffset}`);
+          console.log(`Processed turns: ${summary.processedTurns}`);
+          console.log(`Batches: ${summary.batchCount}`);
+          console.log(`Dry run: ${summary.dryRun ? "yes" : "no"}`);
+          console.log(`Next offset: ${summary.nextOffset}`);
+          if (summary.firstTimestamp) console.log(`First timestamp: ${summary.firstTimestamp}`);
+          if (summary.lastTimestamp) console.log(`Last timestamp: ${summary.lastTimestamp}`);
+          if (summary.warnings.length > 0) {
+            console.log(`Warnings (${summary.warnings.length}):`);
+            for (const warning of summary.warnings.slice(0, 20)) {
+              const idx = typeof warning.index === "number" ? ` @${warning.index}` : "";
+              console.log(`  - ${warning.code}${idx}: ${warning.message}`);
+            }
+            if (summary.warnings.length > 20) {
+              console.log(`  ... and ${summary.warnings.length - 20} more`);
+            }
+          }
           console.log("OK");
         });
 
