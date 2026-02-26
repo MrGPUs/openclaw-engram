@@ -138,22 +138,30 @@ export interface ReplayCliCommandOptions {
 }
 
 export interface ReplayCliOrchestrator {
-  ingestReplayBatch(turns: ReplayTurn[]): Promise<void>;
+  ingestReplayBatch(
+    turns: ReplayTurn[],
+    options?: { deadlineMs?: number },
+  ): Promise<void>;
   waitForConsolidationIdle(timeoutMs?: number): Promise<boolean | void>;
   runConsolidationNow(): Promise<{ memoriesProcessed: number; merged: number; invalidated: number }>;
 }
 
-async function withTimeoutFence<T>(
+async function withTimeout<T>(
   promise: Promise<T>,
   timeoutMs: number,
   timeoutMessage: string,
 ): Promise<T> {
-  const startedAt = Date.now();
-  const result = await promise;
-  if (Date.now() - startedAt > timeoutMs) {
-    throw new Error(timeoutMessage);
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(timeoutMessage)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
   }
-  return result;
 }
 
 export async function runReplayCliCommand(
@@ -187,8 +195,9 @@ export async function runReplayCliCommand(
           bySession.set(key, turns);
         }
         for (const turns of bySession.values()) {
-          await withTimeoutFence(
-            orchestrator.ingestReplayBatch(turns),
+          const deadlineMs = Date.now() + extractionIdleTimeoutMs;
+          await withTimeout(
+            orchestrator.ingestReplayBatch(turns, { deadlineMs }),
             extractionIdleTimeoutMs,
             `replay extraction batch did not complete before timeout (${extractionIdleTimeoutMs}ms)`,
           );

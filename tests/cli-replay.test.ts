@@ -181,6 +181,37 @@ test("runReplayCliCommand handles normalized fallback session keys safely", asyn
   assert.deepEqual(sessionKeysByCall, [["replay:openclaw:import"]]);
 });
 
+test("runReplayCliCommand passes replay deadline to batch ingestion", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "engram-cli-replay-deadline-"));
+  const inputPath = path.join(dir, "replay.jsonl");
+  await writeFile(inputPath, openclawJsonlSample(), "utf-8");
+
+  const seenDeadlines: number[] = [];
+  const orchestrator: ReplayCliOrchestrator = {
+    async ingestReplayBatch(_turns, opts) {
+      if (opts?.deadlineMs) seenDeadlines.push(opts.deadlineMs);
+    },
+    async waitForConsolidationIdle() {
+      return true;
+    },
+    async runConsolidationNow() {
+      return { memoriesProcessed: 0, merged: 0, invalidated: 0 };
+    },
+  };
+
+  await runReplayCliCommand(orchestrator, {
+    source: "openclaw",
+    inputPath,
+    batchSize: 1,
+    extractionIdleTimeoutMs: 1_000,
+  });
+
+  assert.ok(seenDeadlines.length >= 1);
+  for (const deadline of seenDeadlines) {
+    assert.ok(deadline > Date.now() - 60_000);
+  }
+});
+
 test("runReplayCliCommand throws when replay batch processing exceeds timeout", async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), "engram-cli-replay-timeout-"));
   const inputPath = path.join(dir, "replay.jsonl");

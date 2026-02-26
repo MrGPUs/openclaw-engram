@@ -2258,7 +2258,10 @@ export class Orchestrator {
     await this.queueBufferedExtraction(this.buffer.getTurns(), "trigger_mode");
   }
 
-  async ingestReplayBatch(turns: ReplayTurn[]): Promise<void> {
+  async ingestReplayBatch(
+    turns: ReplayTurn[],
+    options: { deadlineMs?: number } = {},
+  ): Promise<void> {
     if (!Array.isArray(turns) || turns.length === 0) return;
 
     const bySession = new Map<string, BufferTurn[]>();
@@ -2286,6 +2289,7 @@ export class Orchestrator {
             skipDedupeCheck: true,
             clearBufferAfterExtraction: false,
             skipMinimumThresholds: true,
+            extractionDeadlineMs: options.deadlineMs,
             onTaskSettled: (err) => (err ? reject(err) : resolve()),
           }).catch(reject);
         }),
@@ -2345,6 +2349,7 @@ export class Orchestrator {
       skipDedupeCheck?: boolean;
       clearBufferAfterExtraction?: boolean;
       skipMinimumThresholds?: boolean;
+      extractionDeadlineMs?: number;
       onTaskSettled?: (error?: unknown) => void;
     } = {},
   ): Promise<void> {
@@ -2358,6 +2363,7 @@ export class Orchestrator {
         await this.runExtraction(turnsToExtract, {
           clearBufferAfterExtraction: options.clearBufferAfterExtraction ?? true,
           skipMinimumThresholds: options.skipMinimumThresholds ?? false,
+          deadlineMs: options.extractionDeadlineMs,
         });
         options.onTaskSettled?.();
       } catch (err) {
@@ -2436,11 +2442,24 @@ export class Orchestrator {
 
   private async runExtraction(
     turns: BufferTurn[],
-    options: { clearBufferAfterExtraction?: boolean; skipMinimumThresholds?: boolean } = {},
+    options: {
+      clearBufferAfterExtraction?: boolean;
+      skipMinimumThresholds?: boolean;
+      deadlineMs?: number;
+    } = {},
   ): Promise<void> {
     log.debug(`running extraction on ${turns.length} turns`);
     const clearBufferAfterExtraction = options.clearBufferAfterExtraction ?? true;
     const skipMinimumThresholds = options.skipMinimumThresholds ?? false;
+    const deadlineMs =
+      typeof options.deadlineMs === "number" && Number.isFinite(options.deadlineMs)
+        ? options.deadlineMs
+        : undefined;
+    const throwIfDeadlineExceeded = (stage: string): void => {
+      if (typeof deadlineMs === "number" && Date.now() > deadlineMs) {
+        throw new Error(`replay extraction deadline exceeded (${stage})`);
+      }
+    };
     const clearBuffer = async () => {
       if (clearBufferAfterExtraction) {
         await this.buffer.clearAfterExtraction();
@@ -2462,6 +2481,7 @@ export class Orchestrator {
         content: t.content.trim().slice(0, this.config.extractionMaxTurnChars),
       }))
       .filter((t) => t.content.length > 0);
+    throwIfDeadlineExceeded("before_extract");
 
     const userTurns = normalizedTurns.filter((t) => t.role === "user");
     const totalChars = normalizedTurns.reduce((sum, t) => sum + t.content.length, 0);
@@ -2482,6 +2502,7 @@ export class Orchestrator {
     // Pass existing entity names so the LLM can reuse them instead of inventing variants
     const existingEntities = await storage.listEntityNames();
     const result = await this.extraction.extract(normalizedTurns, existingEntities);
+    throwIfDeadlineExceeded("before_persist");
 
     // Defensive: validate extraction result before processing
     if (!result) {
