@@ -25,6 +25,11 @@ All notable changes to this project will be documented in this file.
   - Added regression coverage for raw-prompt preservation in non-cron and cron-policy-disabled paths.
 
 ### Added
+- v8.6 observation-ledger maintenance Task 1 (archive service slice):
+  - Added `src/maintenance/archive-observations.ts` with deterministic archive candidate scanning across dated transcript, tool-usage, and hourly-summary artifacts.
+  - Added dry-run-by-default archival behavior with backup-first copy-then-delete flow into `archive/observations/<timestamp>/...`.
+  - Preserved zero-limit compatibility semantics (`retentionDays=0` disables archival).
+  - Added `tests/archive-observations.test.ts` coverage for dry-run, live archive, candidate filtering, and zero-retention behavior.
 - v8.6 replay ingestion Task 3 (CLI + integration slice):
   - Added `openclaw engram replay` command with source selection, date-range filtering, dry-run, offset/max, and batch controls.
   - Added replay command integration helper in `src/cli.ts` that wires source normalizers into replay execution and optional post-replay consolidation.
