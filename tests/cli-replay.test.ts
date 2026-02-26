@@ -88,9 +88,57 @@ test("runReplayCliCommand enqueues batches and can run consolidation", async () 
 
   assert.equal(summary.dryRun, false);
   assert.equal(summary.processedTurns, 2);
-  assert.deepEqual(ingested, [2]);
+  assert.deepEqual(ingested, [1, 1]);
   assert.equal(waitCalls, 1);
   assert.equal(consolidationCalls, 1);
+});
+
+test("runReplayCliCommand honors batch size for single-session ingestion", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "engram-cli-replay-batch-size-"));
+  const inputPath = path.join(dir, "replay.jsonl");
+  const raw = [
+    JSON.stringify({
+      timestamp: "2026-02-25T10:00:00.000Z",
+      role: "user",
+      content: "u1",
+      sessionKey: "agent:generalist:main",
+    }),
+    JSON.stringify({
+      timestamp: "2026-02-25T10:00:01.000Z",
+      role: "assistant",
+      content: "a1",
+      sessionKey: "agent:generalist:main",
+    }),
+    JSON.stringify({
+      timestamp: "2026-02-25T10:00:02.000Z",
+      role: "user",
+      content: "u2",
+      sessionKey: "agent:generalist:main",
+    }),
+  ].join("\n");
+  await writeFile(inputPath, raw, "utf-8");
+
+  const ingested: number[] = [];
+  const orchestrator: ReplayCliOrchestrator = {
+    async ingestReplayBatch(turns) {
+      ingested.push(turns.length);
+    },
+    async waitForConsolidationIdle() {
+      return true;
+    },
+    async runConsolidationNow() {
+      return { memoriesProcessed: 0, merged: 0, invalidated: 0 };
+    },
+  };
+
+  const summary = await runReplayCliCommand(orchestrator, {
+    source: "openclaw",
+    inputPath,
+    batchSize: 2,
+  });
+
+  assert.equal(summary.processedTurns, 3);
+  assert.deepEqual(ingested, [2, 1]);
 });
 
 test("runReplayCliCommand partitions mixed-session batches before ingest", async () => {

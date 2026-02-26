@@ -164,6 +164,13 @@ async function withTimeout<T>(
   }
 }
 
+function clampReplayBatchSize(value: number | undefined): number {
+  if (!Number.isFinite(value as number)) return 100;
+  const parsed = Math.floor(value as number);
+  if (parsed < 1) return 1;
+  return Math.min(parsed, 1000);
+}
+
 export async function runReplayCliCommand(
   orchestrator: ReplayCliOrchestrator,
   options: ReplayCliCommandOptions,
@@ -177,7 +184,16 @@ export async function runReplayCliCommand(
     claudeReplayNormalizer,
     chatgptReplayNormalizer,
   ]);
+  const ingestBatchSize = clampReplayBatchSize(options.batchSize);
   const turnsBySession = new Map<string, ReplayTurn[]>();
+  const ingestSessionChunk = async (sessionTurns: ReplayTurn[]): Promise<void> => {
+    const deadlineMs = Date.now() + extractionIdleTimeoutMs;
+    await withTimeout(
+      orchestrator.ingestReplayBatch(sessionTurns, { deadlineMs }),
+      extractionIdleTimeoutMs,
+      `replay extraction batch did not complete before timeout (${extractionIdleTimeoutMs}ms)`,
+    );
+  };
 
   const summary = await runReplay(
     options.source,
@@ -190,6 +206,10 @@ export async function runReplayCliCommand(
           const turns = turnsBySession.get(key) ?? [];
           turns.push(turn);
           turnsBySession.set(key, turns);
+          while (turns.length >= ingestBatchSize) {
+            const chunk = turns.splice(0, ingestBatchSize);
+            await ingestSessionChunk(chunk);
+          }
         }
       },
     },
@@ -207,12 +227,8 @@ export async function runReplayCliCommand(
 
   if (!summary.dryRun) {
     for (const turns of turnsBySession.values()) {
-      const deadlineMs = Date.now() + extractionIdleTimeoutMs;
-      await withTimeout(
-        orchestrator.ingestReplayBatch(turns, { deadlineMs }),
-        extractionIdleTimeoutMs,
-        `replay extraction batch did not complete before timeout (${extractionIdleTimeoutMs}ms)`,
-      );
+      if (turns.length === 0) continue;
+      await ingestSessionChunk(turns);
     }
     if (options.runConsolidation === true) {
       const consolidationIdle = await orchestrator.waitForConsolidationIdle(extractionIdleTimeoutMs);
