@@ -2296,7 +2296,13 @@ export class Orchestrator {
       );
     }
     if (replayTasks.length > 0) {
-      await Promise.all(replayTasks);
+      const settled = await Promise.allSettled(replayTasks);
+      const firstRejected = settled.find(
+        (result): result is PromiseRejectedResult => result.status === "rejected",
+      );
+      if (firstRejected) {
+        throw firstRejected.reason;
+      }
     }
   }
 

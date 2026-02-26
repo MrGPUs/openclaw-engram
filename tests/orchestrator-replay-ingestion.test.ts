@@ -11,6 +11,11 @@ test("ingestReplayBatch enqueues replay slices without clearing shared buffer", 
     /skipDedupeCheck:\s*true,\s*clearBufferAfterExtraction:\s*false,\s*skipMinimumThresholds:\s*true,/m,
     "replay ingestion should bypass dedupe/minimum thresholds and preserve the live smart buffer",
   );
+  assert.match(
+    source,
+    /const settled = await Promise\.allSettled\(replayTasks\);[\s\S]*firstRejected[\s\S]*throw firstRejected\.reason;/m,
+    "replay ingestion should drain all per-session tasks before surfacing a batch failure",
+  );
 });
 
 test("queueBufferedExtraction preserves explicit false clearBufferAfterExtraction", () => {
