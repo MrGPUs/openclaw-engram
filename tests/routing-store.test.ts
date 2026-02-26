@@ -201,7 +201,7 @@ test("routing store blocks symlink-based state path escapes", async () => {
     await symlink(outsideDir, linkDir);
 
     const store = new RoutingRulesStore(memoryDir, "state-link/routing-rules.json");
-    await store.write([sampleRule()]);
+    await assert.rejects(async () => store.write([sampleRule()]));
 
     await assert.rejects(async () => readFile(path.join(outsideDir, "routing-rules.json"), "utf-8"));
     const rules = await store.read();
@@ -226,7 +226,7 @@ test("routing store blocks final state-file symlink escapes", async () => {
     await symlink(outsideFile, path.join(stateDir, "routing-rules.json"));
 
     const store = new RoutingRulesStore(memoryDir);
-    await store.write([sampleRule()]);
+    await assert.rejects(async () => store.write([sampleRule()]));
 
     const outsideRaw = await readFile(outsideFile, "utf-8");
     assert.equal(outsideRaw, "{}");
@@ -286,6 +286,22 @@ test("routing store does not create out-of-root directories before scope rejecti
     const rules = await store.read();
     assert.deepEqual(rules, []);
 
+    await assert.rejects(async () => stat(path.join(outsideDir, "sub")));
+  } finally {
+    await rm(memoryDir, { recursive: true, force: true });
+    await rm(outsideDir, { recursive: true, force: true });
+  }
+});
+
+test("routing store write does not create out-of-root lock directories", async () => {
+  if (process.platform === "win32") return;
+
+  const memoryDir = await mkdtemp(path.join(os.tmpdir(), "engram-routing-store-lock-symlink-root-"));
+  const outsideDir = await mkdtemp(path.join(os.tmpdir(), "engram-routing-store-lock-symlink-outside-"));
+  try {
+    await symlink(outsideDir, path.join(memoryDir, "state-link"));
+    const store = new RoutingRulesStore(memoryDir, "state-link/sub/routing-rules.json");
+    await assert.rejects(async () => store.write([sampleRule()]));
     await assert.rejects(async () => stat(path.join(outsideDir, "sub")));
   } finally {
     await rm(memoryDir, { recursive: true, force: true });

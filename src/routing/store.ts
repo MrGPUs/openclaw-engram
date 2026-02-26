@@ -1,4 +1,4 @@
-import { lstat, mkdir, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { log } from "../logger.js";
@@ -167,11 +167,13 @@ export class RoutingRulesStore {
       rules: normalized,
     };
 
+    const tmpPath = `${this.statePath}.tmp-${process.pid}-${Date.now()}`;
     try {
       await this.assertStatePathScoped();
-      await mkdir(path.dirname(this.statePath), { recursive: true });
-      await writeFile(this.statePath, JSON.stringify(payload, null, 2), "utf-8");
+      await writeFile(tmpPath, JSON.stringify(payload, null, 2), "utf-8");
+      await rename(tmpPath, this.statePath);
     } catch (err) {
+      await rm(tmpPath, { force: true }).catch(() => {});
       log.debug(`routing rules write failed: ${err}`);
     }
 
@@ -199,6 +201,7 @@ export class RoutingRulesStore {
     const start = Date.now();
     const staleMs = 30_000;
     const timeoutMs = 5_000;
+    await this.assertStatePathScoped();
     await mkdir(path.dirname(this.lockPath), { recursive: true });
 
     while (Date.now() - start < timeoutMs) {
