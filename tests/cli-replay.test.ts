@@ -152,6 +152,51 @@ test("runReplayCliCommand partitions mixed-session batches before ingest", async
   assert.equal(waitCalls, 2);
 });
 
+test("runReplayCliCommand handles normalized fallback session keys safely", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "engram-cli-replay-unknown-session-"));
+  const inputPath = path.join(dir, "replay.jsonl");
+  const raw = [
+    JSON.stringify({
+      timestamp: "2026-02-25T10:00:00.000Z",
+      role: "user",
+      content: "u1",
+      sessionKey: "   ",
+    }),
+    JSON.stringify({
+      timestamp: "2026-02-25T10:00:01.000Z",
+      role: "assistant",
+      content: "a1",
+      sessionKey: "   ",
+    }),
+  ].join("\n");
+  await writeFile(inputPath, raw, "utf-8");
+
+  const sessionKeysByCall: string[][] = [];
+  const orchestrator: ReplayCliOrchestrator = {
+    async ingestReplayBatch(turns) {
+      sessionKeysByCall.push(Array.from(new Set(turns.map((turn) => turn.sessionKey))).sort());
+    },
+    async waitForExtractionIdle() {
+      return true;
+    },
+    async waitForConsolidationIdle() {
+      return true;
+    },
+    async runConsolidationNow() {
+      return { memoriesProcessed: 0, merged: 0, invalidated: 0 };
+    },
+  };
+
+  const summary = await runReplayCliCommand(orchestrator, {
+    source: "openclaw",
+    inputPath,
+    batchSize: 10,
+  });
+
+  assert.equal(summary.processedTurns, 2);
+  assert.deepEqual(sessionKeysByCall, [["replay:openclaw:import"]]);
+});
+
 test("runReplayCliCommand throws when extraction queue does not become idle", async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), "engram-cli-replay-timeout-"));
   const inputPath = path.join(dir, "replay.jsonl");

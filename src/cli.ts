@@ -166,7 +166,10 @@ export async function runReplayCliCommand(
       onBatch: async (batch) => {
         const bySession = new Map<string, ReplayTurn[]>();
         for (const turn of batch) {
-          const key = turn.sessionKey.trim();
+          const key =
+            typeof turn.sessionKey === "string" && turn.sessionKey.trim().length > 0
+              ? turn.sessionKey.trim()
+              : "replay:unknown";
           const turns = bySession.get(key) ?? [];
           turns.push(turn);
           bySession.set(key, turns);
