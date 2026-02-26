@@ -76,3 +76,24 @@ test("archiveObservations ignores recent and non-dated files", async () => {
   assert.equal(result.scannedFiles, 1);
   assert.deepEqual(result.archivedRelativePaths, ["summaries/hourly/main/2026-01-01.md"]);
 });
+
+test("archiveObservations treats retentionDays=0 as disabled", async () => {
+  const memoryDir = await mkdtemp(path.join(os.tmpdir(), "engram-archive-observations-zero-"));
+  const oldFile = "transcripts/main/default/2026-01-01.jsonl";
+  await createFile(memoryDir, oldFile, "{\"role\":\"user\"}\n");
+
+  const result = await archiveObservations({
+    memoryDir,
+    now: new Date("2026-02-26T00:00:00.000Z"),
+    retentionDays: 0,
+    dryRun: false,
+  });
+
+  assert.equal(result.retentionDays, 0);
+  assert.equal(result.scannedFiles, 0);
+  assert.equal(result.archivedFiles, 0);
+  assert.deepEqual(result.archivedRelativePaths, []);
+
+  const raw = await readFile(path.join(memoryDir, oldFile), "utf-8");
+  assert.match(raw, /role/);
+});

@@ -27,7 +27,7 @@ interface CandidateFile {
 
 function normalizeRetentionDays(value: number | undefined): number {
   if (!Number.isFinite(value as number)) return 30;
-  return Math.max(1, Math.floor(value as number));
+  return Math.max(0, Math.floor(value as number));
 }
 
 function extractDateFromFilename(name: string): Date | null {
@@ -97,11 +97,15 @@ export async function archiveObservations(
   const retentionDays = normalizeRetentionDays(options.retentionDays);
   const dryRun = options.dryRun !== false;
   const now = options.now ?? new Date();
-  const cutoffTimeMs = now.getTime() - retentionDays * 24 * 60 * 60 * 1000;
   const stamp = now.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
   const archiveRoot = path.join(options.memoryDir, "archive", "observations", stamp);
-
-  const candidates = await collectArchiveCandidates(options.memoryDir, cutoffTimeMs);
+  const candidates =
+    retentionDays === 0
+      ? []
+      : await collectArchiveCandidates(
+        options.memoryDir,
+        now.getTime() - retentionDays * 24 * 60 * 60 * 1000,
+      );
 
   let archivedFiles = 0;
   let archivedBytes = 0;
