@@ -1,9 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { runCompatChecks } from "../src/compat/checks.js";
 
-const fixturesRoot = path.join(process.cwd(), "tests", "compat-fixtures");
+const testDir = path.dirname(fileURLToPath(import.meta.url));
+const fixturesRoot = path.join(testDir, "compat-fixtures");
 
 function fixturePath(name: string): string {
   return path.join(fixturesRoot, name);
