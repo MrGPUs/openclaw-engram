@@ -346,12 +346,29 @@ export function graphPathRelativeToStorage(storageDir: string, candidatePath: st
   return rel.split(path.sep).join("/");
 }
 
-function graphActivationScoreToRecallScore(score: number): number {
+function normalizeGraphActivationScore(score: number): number {
   const bounded = Number.isFinite(score) && score > 0 ? score : 0;
-  // Keep graph-expanded candidates in the same rough score range as QMD
-  // without overpowering direct retrieval hits.
-  const normalized = bounded / (1 + bounded);
-  return Math.max(0.05, Math.min(0.95, normalized));
+  return bounded / (1 + bounded);
+}
+
+export function blendGraphExpandedRecallScore(options: {
+  graphActivationScore: number;
+  seedRecallScore: number;
+  activationWeight: number;
+  blendMin: number;
+  blendMax: number;
+}): number {
+  const graphNorm = normalizeGraphActivationScore(options.graphActivationScore);
+  const seedScore = Number.isFinite(options.seedRecallScore)
+    ? Math.min(1, Math.max(0, options.seedRecallScore))
+    : 0;
+  const weight = Math.min(1, Math.max(0, options.activationWeight));
+  const rawMin = Math.min(1, Math.max(0, options.blendMin));
+  const rawMax = Math.min(1, Math.max(0, options.blendMax));
+  const minBound = Math.min(rawMin, rawMax);
+  const maxBound = Math.max(rawMin, rawMax);
+  const blended = (graphNorm * weight) + (seedScore * (1 - weight));
+  return Math.max(minBound, Math.min(maxBound, blended));
 }
 
 export function mergeArtifactRecallCandidates(
@@ -1504,12 +1521,13 @@ export class Orchestrator {
 
     for (const [namespace, nsResults] of byNamespace.entries()) {
       const storage = await this.storageRouter.storageFor(namespace);
-      const seedRelativePaths = nsResults
-        .slice(0, perNamespaceSeedCap)
+      const seedCandidates = nsResults.slice(0, perNamespaceSeedCap);
+      const seedRelativePaths = seedCandidates
         .map((result) => graphPathRelativeToStorage(storage.dir, result.path))
         .filter((value): value is string => typeof value === "string" && value.length > 0);
       if (seedRelativePaths.length === 0) continue;
 
+      const seedRecallScore = seedCandidates.reduce((max, item) => Math.max(max, item.score), 0);
       seedPaths.push(...seedRelativePaths.map((rel) => path.join(storage.dir, rel)));
       const seedSet = new Set(seedRelativePaths);
       const expanded = await this.graphIndexFor(storage).spreadingActivation(
@@ -1527,7 +1545,13 @@ export class Orchestrator {
         if (memory.frontmatter.status && memory.frontmatter.status !== "active") continue;
 
         const snippet = memory.content.slice(0, 400);
-        const score = graphActivationScoreToRecallScore(candidate.score);
+        const score = blendGraphExpandedRecallScore({
+          graphActivationScore: candidate.score,
+          seedRecallScore,
+          activationWeight: this.config.graphExpansionActivationWeight,
+          blendMin: this.config.graphExpansionBlendMin,
+          blendMax: this.config.graphExpansionBlendMax,
+        });
         expandedResults.push({
           docid: memory.frontmatter.id,
           path: memory.path,

@@ -281,6 +281,9 @@ See [compounding.md](compounding.md).
 | `causalGraphEnabled` | `true` | Enable causal phrase edges |
 | `maxGraphTraversalSteps` | `3` | Max spreading-activation BFS hops |
 | `graphActivationDecay` | `0.7` | Per-hop decay factor |
+| `graphExpansionActivationWeight` | `0.65` | Blend weight for graph activation vs seed QMD score (0-1) |
+| `graphExpansionBlendMin` | `0.05` | Lower clamp bound for blended graph-expanded scores (0-1) |
+| `graphExpansionBlendMax` | `0.95` | Upper clamp bound for blended graph-expanded scores (0-1) |
 
 ## File Hygiene
 

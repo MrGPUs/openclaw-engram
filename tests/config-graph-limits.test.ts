@@ -31,3 +31,20 @@ test("parseConfig keeps graphRecallEnabled opt-in", () => {
   assert.equal(defaults.graphRecallEnabled, false);
   assert.equal(enabled.graphRecallEnabled, true);
 });
+
+test("parseConfig applies graph expansion scoring defaults and clamps bounds", () => {
+  const defaults = parseConfig({ openaiApiKey: "sk-test" });
+  assert.equal(defaults.graphExpansionActivationWeight, 0.65);
+  assert.equal(defaults.graphExpansionBlendMin, 0.05);
+  assert.equal(defaults.graphExpansionBlendMax, 0.95);
+
+  const clamped = parseConfig({
+    openaiApiKey: "sk-test",
+    graphExpansionActivationWeight: 2,
+    graphExpansionBlendMin: -1,
+    graphExpansionBlendMax: 9,
+  });
+  assert.equal(clamped.graphExpansionActivationWeight, 1);
+  assert.equal(clamped.graphExpansionBlendMin, 0);
+  assert.equal(clamped.graphExpansionBlendMax, 1);
+});
