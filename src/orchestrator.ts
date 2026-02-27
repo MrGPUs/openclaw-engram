@@ -34,6 +34,7 @@ import { buildRecallQueryPolicy } from "./recall-query-policy.js";
 import {
   buildCompressionGuidelinesMarkdown as buildCompressionGuidelinesMarkdownV2,
   computeCompressionGuidelineCandidate,
+  renderCompressionGuidelinesMarkdown,
 } from "./compression-optimizer.js";
 import { BoxBuilder, type BoxFrontmatter } from "./boxes.js";
 import { classifyMemoryKind } from "./himem.js";
@@ -3701,11 +3702,11 @@ export class Orchestrator {
       const previousState = await this.storage.readCompressionGuidelineOptimizerState();
       const events = await this.storage.readMemoryActionEvents(500);
       const generatedAt = new Date().toISOString();
-      const content = buildCompressionGuidelinesMarkdownV2(events, generatedAt, previousState);
       const candidate = computeCompressionGuidelineCandidate(events, {
         generatedAtIso: generatedAt,
         previousState,
       });
+      const content = renderCompressionGuidelinesMarkdown(candidate);
       await this.storage.writeCompressionGuidelines(content);
       await this.storage.writeCompressionGuidelineOptimizerState({
         version: candidate.optimizerVersion,
