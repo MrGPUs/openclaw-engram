@@ -320,7 +320,7 @@ def run_search(payload: dict[str, Any]) -> dict[str, Any]:
         raise SidecarError("modelId is required")
     if not isinstance(query, str) or not query.strip():
         raise SidecarError("query is required")
-    if not isinstance(top_k, int) or top_k <= 0:
+    if not isinstance(top_k, int) or isinstance(top_k, bool) or top_k <= 0:
         raise SidecarError("topK must be a positive integer")
 
     index_dir = ensure_index_dir(str(payload.get("indexPath", "")))
