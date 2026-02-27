@@ -3700,8 +3700,10 @@ export class Orchestrator {
     try {
       const previousState = await this.storage.readCompressionGuidelineOptimizerState();
       const events = await this.storage.readMemoryActionEvents(500);
-      const content = buildCompressionGuidelinesMarkdownV2(events, new Date().toISOString(), previousState);
+      const generatedAt = new Date().toISOString();
+      const content = buildCompressionGuidelinesMarkdownV2(events, generatedAt, previousState);
       const candidate = computeCompressionGuidelineCandidate(events, {
+        generatedAtIso: generatedAt,
         previousState,
       });
       await this.storage.writeCompressionGuidelines(content);

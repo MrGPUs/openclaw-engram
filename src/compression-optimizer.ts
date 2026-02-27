@@ -140,19 +140,21 @@ export function computeCompressionGuidelineCandidate(
     const rawDelta = clamp((successRate - failureRate) * 0.12 + qualitySignal * 0.06, -MAX_DELTA, MAX_DELTA);
     const delta = roundDelta(rawDelta);
 
-    if (summary.outcomes.failed > summary.outcomes.applied) {
+    const direction = delta > 0 ? "increase" : delta < 0 ? "decrease" : "hold";
+    if (direction === "decrease" && summary.outcomes.failed > summary.outcomes.applied) {
       notes.push("Failures exceed applied outcomes; conservative down-adjustment.");
-    } else if (summary.quality.poor > summary.quality.good) {
-      notes.push("Poor recall quality markers exceed good markers.");
-    } else if (summary.quality.good > summary.quality.poor) {
+    } else if (direction === "increase" && summary.quality.good > summary.quality.poor) {
       notes.push("Good recall quality markers support this action.");
+    } else if (direction === "decrease" && summary.quality.poor > summary.quality.good) {
+      notes.push("Poor recall quality markers exceed good markers.");
+    } else if (direction === "increase" && summary.outcomes.failed > summary.outcomes.applied) {
+      notes.push("Quality markers offset failure-heavy outcomes; bounded increase remains conservative.");
     } else {
       notes.push("Outcomes are stable; keep bounded adjustments.");
     }
 
     const magnitude = Math.abs(delta);
     const confidence = magnitude >= 0.09 ? "high" : magnitude >= 0.04 ? "medium" : "low";
-    const direction = delta > 0 ? "increase" : delta < 0 ? "decrease" : "hold";
     return {
       action: summary.action,
       delta,

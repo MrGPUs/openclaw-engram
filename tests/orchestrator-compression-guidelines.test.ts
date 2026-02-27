@@ -60,6 +60,11 @@ test("runCompressionGuidelineLearningPass writes guidelines and optimizer state 
   assert.equal(wroteState?.version, 1);
   assert.equal(wroteState?.guidelineVersion, 1);
   assert.equal(wroteState?.eventCounts.total, 1);
+
+  const generatedLine = wrote.split("\n").find((line) => line.startsWith("Generated: "));
+  assert.ok(generatedLine);
+  const generatedAt = generatedLine.replace("Generated: ", "").trim();
+  assert.equal(wroteState?.updatedAt, generatedAt);
 });
 
 test("runCompressionGuidelineLearningPass is a no-op when disabled", async () => {

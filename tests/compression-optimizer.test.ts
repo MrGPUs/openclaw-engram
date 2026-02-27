@@ -90,6 +90,31 @@ test("computeCompressionGuidelineCandidate emits bounded deltas", () => {
   assert.equal(storeRule?.direction, "decrease");
 });
 
+test("computeCompressionGuidelineCandidate notes never contradict direction", () => {
+  const events: MemoryActionEvent[] = [
+    { timestamp: "2026-02-27T00:00:00.000Z", action: "summarize_node", outcome: "applied", reason: "recall_good" },
+    { timestamp: "2026-02-27T00:01:00.000Z", action: "summarize_node", outcome: "applied", reason: "recall_good" },
+    { timestamp: "2026-02-27T00:02:00.000Z", action: "summarize_node", outcome: "applied", reason: "recall_good" },
+    { timestamp: "2026-02-27T00:03:00.000Z", action: "summarize_node", outcome: "applied", reason: "recall_good" },
+    { timestamp: "2026-02-27T00:04:00.000Z", action: "summarize_node", outcome: "failed", reason: "recall_good" },
+    { timestamp: "2026-02-27T00:05:00.000Z", action: "summarize_node", outcome: "failed", reason: "recall_good" },
+    { timestamp: "2026-02-27T00:06:00.000Z", action: "summarize_node", outcome: "failed", reason: "recall_good" },
+    { timestamp: "2026-02-27T00:07:00.000Z", action: "summarize_node", outcome: "failed", reason: "recall_good" },
+    { timestamp: "2026-02-27T00:08:00.000Z", action: "summarize_node", outcome: "failed", reason: "recall_good" },
+  ];
+
+  const candidate = computeCompressionGuidelineCandidate(events, {
+    generatedAtIso: "2026-02-27T01:00:00.000Z",
+  });
+
+  const summarizeRule = candidate.ruleUpdates.find((item) => item.action === "summarize_node");
+  assert.equal(summarizeRule?.direction, "increase");
+  assert.equal(
+    (summarizeRule?.notes ?? []).some((note) => note.toLowerCase().includes("down-adjustment")),
+    false,
+  );
+});
+
 test("buildCompressionGuidelinesMarkdown includes optimizer metadata", () => {
   const events: MemoryActionEvent[] = [
     { timestamp: "2026-02-27T00:00:00.000Z", action: "summarize_node", outcome: "applied", reason: "recall_good" },
