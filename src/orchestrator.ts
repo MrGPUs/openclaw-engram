@@ -50,8 +50,16 @@ import { GraphIndex } from "./graph.js";
 import { normalizeReplaySessionKey, type ReplayTurn } from "./replay/types.js";
 import type { MemorySummary } from "./types.js";
 import { chunkTranscriptEntries } from "./conversation-index/chunker.js";
-import { writeConversationChunks } from "./conversation-index/indexer.js";
+import { upsertConversationChunksFailOpen, writeConversationChunks } from "./conversation-index/indexer.js";
 import { cleanupConversationChunks } from "./conversation-index/cleanup.js";
+import {
+  FaissConversationIndexAdapter,
+  failOpenFaissHealth,
+} from "./conversation-index/faiss-adapter.js";
+import {
+  searchConversationIndex,
+  searchConversationIndexFaissFailOpen,
+} from "./conversation-index/search.js";
 import { NamespaceStorageRouter } from "./namespaces/storage.js";
 import {
   defaultNamespaceForPrincipal,
@@ -503,6 +511,7 @@ export class Orchestrator {
   private readonly storageRouter: NamespaceStorageRouter;
   readonly qmd: QmdClient;
   private readonly conversationQmd?: QmdClient;
+  private readonly conversationFaiss?: FaissConversationIndexAdapter;
   readonly sharedContext?: SharedContextManager;
   readonly compounding?: CompoundingEngine;
   readonly buffer: SmartBuffer;
@@ -597,6 +606,21 @@ export class Orchestrator {
               daemonRecheckIntervalMs: config.qmdDaemonRecheckIntervalMs,
             },
           )
+        : undefined;
+    this.conversationFaiss =
+      config.conversationIndexEnabled && config.conversationIndexBackend === "faiss"
+        ? new FaissConversationIndexAdapter({
+            memoryDir: config.memoryDir,
+            scriptPath: config.conversationIndexFaissScriptPath,
+            pythonBin: config.conversationIndexFaissPythonBin,
+            modelId: config.conversationIndexFaissModelId,
+            indexDir: config.conversationIndexFaissIndexDir,
+            upsertTimeoutMs: config.conversationIndexFaissUpsertTimeoutMs,
+            searchTimeoutMs: config.conversationIndexFaissSearchTimeoutMs,
+            healthTimeoutMs: config.conversationIndexFaissHealthTimeoutMs,
+            maxBatchSize: config.conversationIndexFaissMaxBatchSize,
+            maxSearchK: config.conversationIndexFaissMaxSearchK,
+          })
         : undefined;
     this.sharedContext = config.sharedContextEnabled ? new SharedContextManager(config) : undefined;
     this.compounding = config.compoundingEnabled ? new CompoundingEngine(config) : undefined;
@@ -821,7 +845,11 @@ export class Orchestrator {
       }
     }
 
-    if (this.config.conversationIndexEnabled && this.conversationQmd) {
+    if (
+      this.config.conversationIndexEnabled &&
+      this.config.conversationIndexBackend === "qmd" &&
+      this.conversationQmd
+    ) {
       const available = await this.conversationQmd.probe();
       if (available) {
         log.info(`Conversation index QMD: available ${this.conversationQmd.debugStatus()}`);
@@ -842,6 +870,19 @@ export class Orchestrator {
         }
       } else {
         log.warn(`Conversation index QMD: not available ${this.conversationQmd.debugStatus()}`);
+      }
+    }
+
+    if (
+      this.config.conversationIndexEnabled &&
+      this.config.conversationIndexBackend === "faiss" &&
+      this.conversationFaiss
+    ) {
+      const health = await failOpenFaissHealth(this.conversationFaiss);
+      if (health.ok) {
+        log.info(`Conversation index FAISS: available (status=${health.status})`);
+      } else {
+        log.warn(`Conversation index FAISS: degraded (${health.message ?? health.status})`);
       }
     }
 
@@ -1046,6 +1087,39 @@ export class Orchestrator {
     ].join("\n");
   }
 
+  private async searchConversationRecallResults(
+    retrievalQuery: string,
+    topK: number,
+  ): Promise<Array<{ path: string; snippet: string; score: number }>> {
+    if (this.config.conversationIndexBackend === "faiss") {
+      return searchConversationIndexFaissFailOpen(this.conversationFaiss, retrievalQuery, topK);
+    }
+    if (this.conversationQmd && this.conversationQmd.isAvailable()) {
+      return searchConversationIndex(this.conversationQmd, retrievalQuery, topK);
+    }
+    return [];
+  }
+
+  private formatConversationRecallSection(
+    results: Array<{ path: string; snippet: string; score: number }>,
+    maxChars: number,
+  ): string | null {
+    if (!Array.isArray(results) || results.length === 0) return null;
+    const lines: string[] = ["## Semantic Recall (Past Conversations)", ""];
+    let used = 0;
+    for (const r of results) {
+      if (!r?.snippet) continue;
+      const chunk =
+        `### ${r.path}\n` +
+        `Score: ${r.score.toFixed(3)}\n\n` +
+        `${r.snippet.trim()}\n`;
+      if (used + chunk.length > maxChars) break;
+      lines.push(chunk);
+      used += chunk.length;
+    }
+    return used > 0 ? lines.join("\n") : null;
+  }
+
   async updateConversationIndex(
     sessionKey: string,
     hours: number = 24,
@@ -1081,18 +1155,24 @@ export class Orchestrator {
       this.conversationIndexDir,
       this.config.conversationIndexRetentionDays,
     );
-    // Best-effort: ask qmd to update indexes (will no-op if qmd missing).
-    const q = this.conversationQmd ?? this.qmd;
-    const usingPrimaryQmdClient = q === this.qmd;
     const shouldEmbed = opts?.embed ?? this.config.conversationIndexEmbedOnUpdate;
     let embedded = false;
-    if ((!usingPrimaryQmdClient || this.config.qmdEnabled) && q.isAvailable()) {
-      await q.update();
-      if (shouldEmbed) {
-        await q.embed();
-        embedded = true;
+
+    if (this.config.conversationIndexBackend === "faiss") {
+      await upsertConversationChunksFailOpen(this.conversationFaiss, chunks);
+    } else {
+      // Best-effort: ask qmd to update indexes (will no-op if qmd missing).
+      const q = this.conversationQmd ?? this.qmd;
+      const usingPrimaryQmdClient = q === this.qmd;
+      if ((!usingPrimaryQmdClient || this.config.qmdEnabled) && q.isAvailable()) {
+        await q.update();
+        if (shouldEmbed) {
+          await q.embed();
+          embedded = true;
+        }
       }
     }
+
     this.conversationIndexLastUpdateAtMs.set(sessionKey, Date.now());
     return { chunks: chunks.length, skipped: false, embedded };
   }
@@ -2151,19 +2231,14 @@ export class Orchestrator {
     // 4.5. Conversation semantic recall hook (optional, default off).
     // This searches over transcript chunk docs (ideally a separate QMD collection).
     const convT0 = Date.now();
-    if (
-      this.config.conversationIndexEnabled &&
-      !queryPolicy.skipConversationRecall &&
-      this.conversationQmd &&
-      this.conversationQmd.isAvailable()
-    ) {
+    if (this.config.conversationIndexEnabled && !queryPolicy.skipConversationRecall) {
       const startedAtMs = Date.now();
       const timeoutMs = Math.max(200, this.config.conversationRecallTimeoutMs);
       const topK = Math.max(1, this.config.conversationRecallTopK);
       const maxChars = Math.max(400, this.config.conversationRecallMaxChars);
 
       const results = (await Promise.race([
-        this.conversationQmd.search(retrievalQuery, undefined, topK),
+        this.searchConversationRecallResults(retrievalQuery, topK),
         new Promise<[]>(resolve => setTimeout(() => resolve([]), timeoutMs)),
       ]).catch(() => [])) as Array<{ path: string; snippet: string; score: number }>;
 
@@ -2172,22 +2247,9 @@ export class Orchestrator {
         log.debug(`conversation recall: timed out after ${timeoutMs}ms`);
       }
 
-      if (Array.isArray(results) && results.length > 0) {
-        const lines: string[] = ["## Semantic Recall (Past Conversations)", ""];
-        let used = 0;
-        for (const r of results) {
-          if (!r?.snippet) continue;
-          const chunk =
-            `### ${r.path}\n` +
-            `Score: ${r.score.toFixed(3)}\n\n` +
-            `${r.snippet.trim()}\n`;
-          if (used + chunk.length > maxChars) break;
-          lines.push(chunk);
-          used += chunk.length;
-        }
-        if (used > 0) {
-          sections.push(lines.join("\n"));
-        }
+      const formattedConversationRecall = this.formatConversationRecallSection(results, maxChars);
+      if (formattedConversationRecall) {
+        sections.push(formattedConversationRecall);
       }
     }
 
