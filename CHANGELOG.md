@@ -68,6 +68,10 @@ All notable changes to this project will be documented in this file.
   - Added `src/conversation-index/faiss-adapter.ts` with subprocess-backed FAISS adapter APIs (`upsertChunks`, `searchChunks`, `health`) and bounded timeout/stderr/JSON error handling.
   - Added fail-open helper wrappers in `src/conversation-index/indexer.ts` and `src/conversation-index/search.ts` so adapter failures degrade to no-op/empty recall instead of throwing into hook paths.
   - Added `tests/conversation-index-faiss-adapter.test.ts` coverage for success, timeout, non-zero exit, malformed payload, and fail-open wrapper behavior.
+- v8.10 FAISS conversation index Task 3 (Python sidecar CLI + smoke tests):
+  - Added `scripts/faiss_index.py` JSON-in/JSON-out sidecar commands (`upsert`, `search`, `health`) with fail-open error envelopes and deterministic local `__hash__` embedding mode for smoke validation.
+  - Added `scripts/faiss_requirements.txt` and `scripts/faiss/README.md` with dependency and operational contract guidance.
+  - Added `tests/conversation-index-faiss-smoke.test.ts` with sidecar contract checks and a dependency-gated FAISS upsert/search smoke path.
 - v8.7 custom memory routing rules Task 1 (routing engine):
   - Added `src/routing/engine.ts` with deterministic route-rule evaluation, regex/keyword matching, and priority-ordered selection.
   - Added safe route target validation for categories and namespaces (path traversal and separator rejection).
