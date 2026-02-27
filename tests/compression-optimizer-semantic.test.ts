@@ -44,6 +44,32 @@ test("semantic refinement fail-opens on timeout", async () => {
   assert.deepEqual(refined, baseline);
 });
 
+test("semantic refinement timeout does not leak late rejections", async () => {
+  const baseline = baselineCandidate();
+  let unhandled: unknown = null;
+  const onUnhandled = (reason: unknown) => {
+    unhandled = reason;
+  };
+  process.once("unhandledRejection", onUnhandled);
+
+  try {
+    const refined = await refineCompressionGuidelineCandidateSemantically(baseline, {
+      enabled: true,
+      timeoutMs: 5,
+      runRefinement: async () => {
+        await new Promise((_, reject) => setTimeout(() => reject(new Error("late failure")), 30));
+        return { updates: [] };
+      },
+    });
+
+    assert.deepEqual(refined, baseline);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.equal(unhandled, null);
+  } finally {
+    process.removeListener("unhandledRejection", onUnhandled);
+  }
+});
+
 test("semantic refinement fail-opens on runner error", async () => {
   const baseline = baselineCandidate();
   const refined = await refineCompressionGuidelineCandidateSemantically(baseline, {
