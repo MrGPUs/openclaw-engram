@@ -303,8 +303,9 @@ def run_upsert(payload: dict[str, Any]) -> dict[str, Any]:
         texts = [row["text"] for row in merged]
         vectors, _np, faiss = embed_texts(texts, model_id)
 
-        write_metadata(meta_path, merged)
+        # Commit FAISS index first; metadata follows so we never point at missing vectors.
         write_index(idx_path, vectors, faiss)
+        write_metadata(meta_path, merged)
     finally:
         release_index_lock(lock_path)
 
