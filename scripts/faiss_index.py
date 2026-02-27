@@ -216,6 +216,30 @@ def merge_rows(existing: list[dict[str, Any]], updates: list[dict[str, Any]]) ->
     return [by_id[row_id] for row_id in order]
 
 
+def read_lock_owner_pid(lock_path: Path) -> int | None:
+    try:
+        raw = lock_path.read_text(encoding="utf-8").strip()
+    except Exception:
+        return None
+    if not raw:
+        return None
+    try:
+        pid = int(raw)
+    except ValueError:
+        return None
+    return pid if pid > 0 else None
+
+
+def is_process_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+
+
 def acquire_index_lock(index_dir: Path) -> Path:
     lock_path = index_dir / ".index.lock"
     deadline = time.monotonic() + LOCK_TIMEOUT_SECONDS
@@ -229,10 +253,14 @@ def acquire_index_lock(index_dir: Path) -> Path:
         except FileExistsError:
             try:
                 age = time.time() - lock_path.stat().st_mtime
-                if age > LOCK_STALE_SECONDS:
-                    lock_path.unlink(missing_ok=True)
-                    continue
             except FileNotFoundError:
+                continue
+
+            owner_pid = read_lock_owner_pid(lock_path)
+            owner_alive = is_process_alive(owner_pid) if owner_pid is not None else False
+
+            if age > LOCK_STALE_SECONDS and not owner_alive:
+                lock_path.unlink(missing_ok=True)
                 continue
 
             if time.monotonic() >= deadline:
@@ -326,9 +354,15 @@ def run_health(payload: dict[str, Any]) -> dict[str, Any]:
 
     status = "ok"
     error = ""
+    model_id = normalize_model_id(str(payload.get("modelId", "")))
 
     try:
         load_vector_dependencies()
+        if model_id not in ("__hash__", "hash"):
+            try:
+                import sentence_transformers  # type: ignore # noqa: F401
+            except Exception as exc:
+                raise DependencyError(f"missing sentence-transformers dependency: {exc}") from exc
     except Exception as exc:
         status = "degraded"
         error = str(exc)
