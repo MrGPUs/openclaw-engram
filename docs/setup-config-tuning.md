@@ -181,6 +181,16 @@ Operational checks after enabling guideline learning:
 - Verify fail-open behavior by temporarily making state unwritable and confirming consolidation still completes.
 - If guidance quality regresses, keep telemetry enabled and disable only `compressionGuidelineLearningEnabled`.
 
+v8.13 action-policy rollout presets:
+- Canonical preset JSON lives in `docs/config-reference.md` under `v8.13 Action-Policy Rollout Presets`.
+- Use `conservative` for baseline-equivalent mode, `balanced` for default production rollout, and `research` for high-change experiments.
+
+Operator hardening checklist before promotion:
+- Keep `contextCompressionActionsEnabled=true` only after tool traces stay stable and review-clean for one full daily cycle.
+- Treat `maxCompressionTokensPerHour=0` as an intentional hard disable for policy defers.
+- If regressions appear, first disable `compressionGuidelineSemanticRefinementEnabled`, then disable `compressionGuidelineLearningEnabled`.
+- Confirm disabled-path behavior by toggling all action-policy features off and verifying recall outputs remain baseline-equivalent.
+
 Conversation index health check command:
 
 ```bash
