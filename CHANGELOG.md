@@ -81,6 +81,12 @@ All notable changes to this project will be documented in this file.
   - Added CLI command surface `openclaw engram conversation-index-health` via `runConversationIndexHealthCliCommand`.
   - Added `tests/cli-conversation-index-health.test.ts` coverage for CLI wrapper behavior and backend health/fail-open scenarios.
   - Updated `docs/operations.md` and `docs/setup-config-tuning.md` with conversation-index health command usage.
+- v8.12 graph retrieval phase 2 Task 1 (expansion scoring controls):
+  - Added graph expansion scoring config knobs: `graphExpansionActivationWeight`, `graphExpansionBlendMin`, and `graphExpansionBlendMax` with clamped parse-time handling.
+  - Added bounded blend function for graph-expanded candidate scoring to combine normalized activation with seed QMD signal while enforcing configurable score bounds.
+  - Updated graph expansion path in orchestrator to use blended scoring per namespace seed set.
+  - Added `tests/graph-recall-scoring.test.ts` for monotonic blend behavior and filter-before-cap invariants, plus config clamp/default coverage updates.
+  - Documented new graph scoring controls in `docs/config-reference.md` and `openclaw.plugin.json`.
 - v8.11 compression optimizer Task 5 (runtime integration + guardrails):
   - Added runtime recall integration for active compression guidelines via a guarded section injected only when context-compression actions and guideline learning are both enabled.
   - Added fail-open guideline parsing/extraction helper (`formatCompressionGuidelinesForRecall`) that reads only the suggested-guidelines block for recall usage.

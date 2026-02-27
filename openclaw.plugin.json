@@ -446,6 +446,21 @@
         "default": 0.7,
         "description": "Per-hop activation decay factor (0-1). Default 0.7."
       },
+      "graphExpansionActivationWeight": {
+        "type": "number",
+        "default": 0.65,
+        "description": "Blend weight for graph activation when scoring expanded results (0-1). Higher values favor graph activation over seed QMD score."
+      },
+      "graphExpansionBlendMin": {
+        "type": "number",
+        "default": 0.05,
+        "description": "Lower clamp bound for blended graph-expanded recall scores (0-1)."
+      },
+      "graphExpansionBlendMax": {
+        "type": "number",
+        "default": 0.95,
+        "description": "Upper clamp bound for blended graph-expanded recall scores (0-1)."
+      },
       "maxEntityGraphEdgesPerMemory": {
         "type": "number",
         "default": 10,

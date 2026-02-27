@@ -748,6 +748,18 @@ export function parseConfig(raw: unknown): PluginConfig {
       typeof cfg.graphActivationDecay === "number"
         ? Math.min(1, Math.max(0, cfg.graphActivationDecay))
         : 0.7,
+    graphExpansionActivationWeight:
+      typeof cfg.graphExpansionActivationWeight === "number"
+        ? Math.min(1, Math.max(0, cfg.graphExpansionActivationWeight))
+        : 0.65,
+    graphExpansionBlendMin:
+      typeof cfg.graphExpansionBlendMin === "number"
+        ? Math.min(1, Math.max(0, cfg.graphExpansionBlendMin))
+        : 0.05,
+    graphExpansionBlendMax:
+      typeof cfg.graphExpansionBlendMax === "number"
+        ? Math.min(1, Math.max(0, cfg.graphExpansionBlendMax))
+        : 0.95,
     maxEntityGraphEdgesPerMemory:
       typeof cfg.maxEntityGraphEdgesPerMemory === "number"
         ? Math.max(0, cfg.maxEntityGraphEdgesPerMemory)

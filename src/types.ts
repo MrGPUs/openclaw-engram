@@ -361,6 +361,12 @@ export interface PluginConfig {
   causalGraphEnabled: boolean;
   maxGraphTraversalSteps: number;
   graphActivationDecay: number;
+  /** Weight of graph activation score when blending with seed QMD score (0-1). */
+  graphExpansionActivationWeight: number;
+  /** Lower bound for blended graph-expanded recall scores (0-1). */
+  graphExpansionBlendMin: number;
+  /** Upper bound for blended graph-expanded recall scores (0-1). */
+  graphExpansionBlendMax: number;
   maxEntityGraphEdgesPerMemory: number;
   // v8.2: Temporal Memory Tree
   temporalMemoryTreeEnabled: boolean;
