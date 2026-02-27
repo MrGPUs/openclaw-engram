@@ -153,13 +153,27 @@ export class FaissConversationIndexAdapter {
       stderrChunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
     });
 
-    child.stdin.write(JSON.stringify(payload));
-    child.stdin.end();
+    let code: number | null;
+    try {
+      child.stdin.write(JSON.stringify(payload));
+      child.stdin.end();
 
-    const code = await new Promise<number | null>((resolve, reject) => {
-      child.once("error", reject);
-      child.once("close", (exitCode) => resolve(exitCode));
-    }).finally(() => clearTimeout(timer));
+      code = await new Promise<number | null>((resolve, reject) => {
+        const rejectAsProcessError = (err: unknown) => {
+          const msg = err instanceof Error ? err.message : String(err);
+          reject(new FaissAdapterError(`FAISS sidecar stream/process error (${command}): ${msg}`, "non_zero_exit"));
+        };
+        child.once("error", rejectAsProcessError);
+        child.stdin.once("error", rejectAsProcessError);
+        child.once("close", (exitCode) => resolve(exitCode));
+      });
+    } catch (err) {
+      if (err instanceof FaissAdapterError) throw err;
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new FaissAdapterError(`FAISS sidecar stream/process error (${command}): ${msg}`, "non_zero_exit");
+    } finally {
+      clearTimeout(timer);
+    }
 
     const stdout = Buffer.concat(stdoutChunks).toString("utf-8").trim();
     const stderr = Buffer.concat(stderrChunks).toString("utf-8").trim();

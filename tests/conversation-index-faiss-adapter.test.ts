@@ -14,17 +14,21 @@ import { upsertConversationChunksFailOpen } from "../src/conversation-index/inde
 import { searchConversationIndexFaissFailOpen } from "../src/conversation-index/search.js";
 import type { ConversationChunk } from "../src/conversation-index/chunker.js";
 
+class FakeStdin extends EventEmitter {
+  readonly writes: string[] = [];
+
+  write(chunk: string) {
+    this.writes.push(chunk);
+    return true;
+  }
+
+  end() {}
+}
+
 class FakeProcess extends EventEmitter {
   readonly stdout = new EventEmitter();
   readonly stderr = new EventEmitter();
-  readonly stdinWrites: string[] = [];
-  readonly stdin = {
-    write: (chunk: string) => {
-      this.stdinWrites.push(chunk);
-      return true;
-    },
-    end: () => {},
-  };
+  readonly stdin = new FakeStdin();
   killSignal: string | null = null;
 
   kill(signal: string) {
@@ -84,7 +88,7 @@ test("faiss adapter upsertChunks success path parses JSON output", async () => {
   const upserted = await adapter.upsertChunks(sampleChunks());
   assert.equal(upserted, 1);
 
-  const payload = JSON.parse(proc.stdinWrites.join(""));
+  const payload = JSON.parse(proc.stdin.writes.join(""));
   assert.equal(payload.modelId, "text-embedding-3-small");
   assert.equal(payload.chunks.length, 1);
 });
@@ -178,6 +182,26 @@ test("faiss adapter throws malformed output for invalid or empty payloads", asyn
   await assert.rejects(
     () => new FaissConversationIndexAdapter(baseConfig(emptySpawn)).health(),
     (err: unknown) => err instanceof FaissAdapterError && err.code === "malformed_output",
+  );
+});
+
+test("faiss adapter converts stdin stream errors into adapter failures", async () => {
+  const proc = new FakeProcess();
+  const spawnFn: typeof childProcess.spawn = () => {
+    process.nextTick(() => {
+      proc.stdin.emit("error", new Error("EPIPE"));
+    });
+    return proc as unknown as childProcess.ChildProcess;
+  };
+
+  await assert.rejects(
+    () => new FaissConversationIndexAdapter(baseConfig(spawnFn)).health(),
+    (err: unknown) => {
+      assert.ok(err instanceof FaissAdapterError);
+      assert.equal(err.code, "non_zero_exit");
+      assert.match(err.message, /EPIPE/);
+      return true;
+    },
   );
 });
 
