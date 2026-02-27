@@ -3,7 +3,7 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import type { CompatCheckOptions, CompatCheckResult, CompatReport, CompatRunner } from "./types.js";
 
-const REQUIRED_HOOKS = ["gateway_start", "before_agent_start", "agent_end"];
+const REQUIRED_HOOKS = ["before_agent_start", "agent_end"];
 
 function isSafeCommandToken(command: string): boolean {
   return /^[a-zA-Z0-9._-]+$/.test(command);
@@ -37,6 +37,14 @@ function parseHookRegistrations(source: string): Set<string> {
     hooks.add(match[1]);
   }
   return hooks;
+}
+
+function hasServiceStartRegistration(source: string): boolean {
+  return /api\.registerService\s*\(\s*\{[\s\S]*?\bstart\s*:/m.test(source);
+}
+
+function hasCliRegistration(source: string): boolean {
+  return /registerCli\s*\([\s\S]*?orchestrator\s*\)/m.test(source);
 }
 
 function parseNodeMinVersion(raw: string | undefined): [number, number, number] | null {
@@ -203,24 +211,33 @@ export async function runCompatChecks(options: CompatCheckOptions): Promise<Comp
     const indexRaw = await readFile(indexPath, "utf-8");
     const hooks = parseHookRegistrations(indexRaw);
     const missingHooks = REQUIRED_HOOKS.filter((hook) => !hooks.has(hook));
-    if (missingHooks.length === 0) {
+    const hasGatewayStartHook = hooks.has("gateway_start");
+    const hasServiceStart = hasServiceStartRegistration(indexRaw);
+    if (missingHooks.length === 0 && (hasGatewayStartHook || hasServiceStart)) {
       checks.push({
         id: "hook-registration-core",
         title: "Core hook registration",
         level: "ok",
-        message: "Core hooks are registered in src/index.ts.",
+        message: "Core recall/extraction hooks and startup wiring are registered in src/index.ts.",
       });
     } else {
+      const missingParts: string[] = [];
+      if (missingHooks.length > 0) {
+        missingParts.push(`hooks: ${missingHooks.join(", ")}`);
+      }
+      if (!hasGatewayStartHook && !hasServiceStart) {
+        missingParts.push("startup wiring: gateway_start hook or api.registerService({ start })");
+      }
       checks.push({
         id: "hook-registration-core",
         title: "Core hook registration",
         level: "error",
-        message: `Missing expected hook registrations: ${missingHooks.join(", ")}`,
-        remediation: "Ensure src/index.ts registers gateway_start, before_agent_start, and agent_end hooks.",
+        message: `Missing expected registration(s): ${missingParts.join("; ")}`,
+        remediation: "Ensure src/index.ts registers before_agent_start and agent_end, plus either gateway_start or api.registerService({ start }).",
       });
     }
 
-    const cliWired = indexRaw.includes("registerCli(api, orchestrator)");
+    const cliWired = hasCliRegistration(indexRaw);
     checks.push({
       id: "cli-registration",
       title: "CLI registration wiring",
