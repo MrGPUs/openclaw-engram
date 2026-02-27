@@ -216,9 +216,11 @@ export async function refineCompressionGuidelineCandidateSemantically(
     timeoutId = setTimeout(() => resolve(null), timeoutMs);
   });
 
+  const refinementPromise = options.runRefinement(baseline).catch(() => null);
+
   let refinement: CompressionSemanticRefinementResult | null = null;
   try {
-    refinement = await Promise.race([options.runRefinement(baseline), timeout]);
+    refinement = await Promise.race([refinementPromise, timeout]);
   } catch {
     if (timeoutId) clearTimeout(timeoutId);
     return baseline;
