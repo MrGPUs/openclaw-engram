@@ -139,7 +139,7 @@ def normalize_model_id(model_id: str) -> str:
 
 def get_embedder(model_id: str) -> Any:
     resolved_model_id = normalize_model_id(model_id)
-    if resolved_model_id in ("__hash__", "hash"):
+    if resolved_model_id == "__hash__":
         return None
     if resolved_model_id in MODEL_CACHE:
         return MODEL_CACHE[resolved_model_id]
@@ -392,7 +392,7 @@ def run_health(payload: dict[str, Any]) -> dict[str, Any]:
 
     try:
         load_vector_dependencies()
-        if model_id not in ("__hash__", "hash"):
+        if model_id != "__hash__":
             try:
                 import sentence_transformers  # type: ignore # noqa: F401
             except Exception as exc:
