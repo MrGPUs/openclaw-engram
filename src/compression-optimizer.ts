@@ -176,16 +176,7 @@ export function computeCompressionGuidelineCandidate(
   };
 }
 
-export function buildCompressionGuidelinesMarkdown(
-  events: MemoryActionEvent[],
-  generatedAtIso: string = new Date().toISOString(),
-  previousState: CompressionGuidelineOptimizerState | null = null,
-): string {
-  const candidate = computeCompressionGuidelineCandidate(events, {
-    generatedAtIso,
-    previousState,
-  });
-
+export function renderCompressionGuidelinesMarkdown(candidate: CompressionGuidelineCandidate): string {
   const actionLines =
     candidate.actionSummaries.length === 0
       ? ["- (none)"]
@@ -221,4 +212,16 @@ export function buildCompressionGuidelinesMarkdown(
     ...updateLines,
     "",
   ].join("\n");
+}
+
+export function buildCompressionGuidelinesMarkdown(
+  events: MemoryActionEvent[],
+  generatedAtIso: string = new Date().toISOString(),
+  previousState: CompressionGuidelineOptimizerState | null = null,
+): string {
+  const candidate = computeCompressionGuidelineCandidate(events, {
+    generatedAtIso,
+    previousState,
+  });
+  return renderCompressionGuidelinesMarkdown(candidate);
 }
