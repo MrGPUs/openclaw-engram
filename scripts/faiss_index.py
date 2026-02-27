@@ -11,11 +11,19 @@ import hashlib
 import json
 import os
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
 MODEL_CACHE: dict[str, Any] = {}
 HASH_EMBED_DIM = 128
+LOCK_TIMEOUT_SECONDS = 10.0
+LOCK_STALE_SECONDS = 120.0
+MODEL_ID_ALIASES = {
+    "text-embedding-3-small": "sentence-transformers/all-MiniLM-L6-v2",
+    "text-embedding-3-large": "sentence-transformers/all-mpnet-base-v2",
+    "text-embedding-ada-002": "sentence-transformers/all-MiniLM-L6-v2",
+}
 
 
 class SidecarError(Exception):
@@ -111,17 +119,25 @@ def load_vector_dependencies() -> tuple[Any, Any]:
     return np, faiss
 
 
+def normalize_model_id(model_id: str) -> str:
+    cleaned = (model_id or "").strip()
+    if not cleaned:
+        return "sentence-transformers/all-MiniLM-L6-v2"
+    return MODEL_ID_ALIASES.get(cleaned, cleaned)
+
+
 def get_embedder(model_id: str) -> Any:
-    if model_id in ("__hash__", "hash"):
+    resolved_model_id = normalize_model_id(model_id)
+    if resolved_model_id in ("__hash__", "hash"):
         return None
-    if model_id in MODEL_CACHE:
-        return MODEL_CACHE[model_id]
+    if resolved_model_id in MODEL_CACHE:
+        return MODEL_CACHE[resolved_model_id]
     try:
         from sentence_transformers import SentenceTransformer  # type: ignore
     except Exception as exc:
         raise DependencyError(f"missing sentence-transformers dependency: {exc}") from exc
-    MODEL_CACHE[model_id] = SentenceTransformer(model_id)
-    return MODEL_CACHE[model_id]
+    MODEL_CACHE[resolved_model_id] = SentenceTransformer(resolved_model_id)
+    return MODEL_CACHE[resolved_model_id]
 
 
 def embed_with_hash(texts: list[str], np: Any) -> Any:
@@ -200,6 +216,34 @@ def merge_rows(existing: list[dict[str, Any]], updates: list[dict[str, Any]]) ->
     return [by_id[row_id] for row_id in order]
 
 
+def acquire_index_lock(index_dir: Path) -> Path:
+    lock_path = index_dir / ".index.lock"
+    deadline = time.monotonic() + LOCK_TIMEOUT_SECONDS
+
+    while True:
+        try:
+            fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                handle.write(str(os.getpid()))
+            return lock_path
+        except FileExistsError:
+            try:
+                age = time.time() - lock_path.stat().st_mtime
+                if age > LOCK_STALE_SECONDS:
+                    lock_path.unlink(missing_ok=True)
+                    continue
+            except FileNotFoundError:
+                continue
+
+            if time.monotonic() >= deadline:
+                raise SidecarError("timed out waiting for FAISS index lock")
+            time.sleep(0.05)
+
+
+def release_index_lock(lock_path: Path) -> None:
+    lock_path.unlink(missing_ok=True)
+
+
 def run_upsert(payload: dict[str, Any]) -> dict[str, Any]:
     model_id = payload.get("modelId")
     if not isinstance(model_id, str) or not model_id:
@@ -211,16 +255,20 @@ def run_upsert(payload: dict[str, Any]) -> dict[str, Any]:
     if not chunks:
         return {"ok": True, "upserted": 0}
 
-    meta_path = metadata_file(index_dir)
-    idx_path = index_file(index_dir)
-    existing = read_metadata(meta_path)
-    merged = merge_rows(existing, chunks)
+    lock_path = acquire_index_lock(index_dir)
+    try:
+        meta_path = metadata_file(index_dir)
+        idx_path = index_file(index_dir)
+        existing = read_metadata(meta_path)
+        merged = merge_rows(existing, chunks)
 
-    texts = [row["text"] for row in merged]
-    vectors, _np, faiss = embed_texts(texts, model_id)
+        texts = [row["text"] for row in merged]
+        vectors, _np, faiss = embed_texts(texts, model_id)
 
-    write_metadata(meta_path, merged)
-    write_index(idx_path, vectors, faiss)
+        write_metadata(meta_path, merged)
+        write_index(idx_path, vectors, faiss)
+    finally:
+        release_index_lock(lock_path)
 
     return {"ok": True, "upserted": len(chunks)}
 
@@ -278,12 +326,9 @@ def run_health(payload: dict[str, Any]) -> dict[str, Any]:
 
     status = "ok"
     error = ""
-    model_id = str(payload.get("modelId", "")) or "sentence-transformers/all-MiniLM-L6-v2"
 
     try:
         load_vector_dependencies()
-        if model_id not in ("__hash__", "hash"):
-            get_embedder(model_id)
     except Exception as exc:
         status = "degraded"
         error = str(exc)
