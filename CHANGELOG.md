@@ -72,6 +72,10 @@ All notable changes to this project will be documented in this file.
   - Added `scripts/faiss_index.py` JSON-in/JSON-out sidecar commands (`upsert`, `search`, `health`) with fail-open error envelopes and deterministic local `__hash__` embedding mode for smoke validation.
   - Added `scripts/faiss_requirements.txt` and `scripts/faiss/README.md` with dependency and operational contract guidance.
   - Added `tests/conversation-index-faiss-smoke.test.ts` with sidecar contract checks and a dependency-gated FAISS upsert/search smoke path.
+- v8.10 FAISS conversation index Task 4 (orchestrator backend wiring + parity tests):
+  - Wired orchestrator conversation-index flow to select `qmd` or `faiss` backend paths for startup health checks, index updates, and semantic recall queries.
+  - Preserved fail-open recall behavior for FAISS search/upsert failures and kept semantic-recall section formatting backend-agnostic via shared formatter logic.
+  - Added `tests/conversation-index-integration.test.ts` coverage for backend routing (`qmd` vs `faiss`), FAISS fail-open recall, formatting parity, and FAISS update-path routing.
 - v8.7 custom memory routing rules Task 1 (routing engine):
   - Added `src/routing/engine.ts` with deterministic route-rule evaluation, regex/keyword matching, and priority-ordered selection.
   - Added safe route target validation for categories and namespaces (path traversal and separator rejection).
