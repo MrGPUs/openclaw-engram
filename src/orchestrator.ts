@@ -91,8 +91,13 @@ import { TierMigrationExecutor } from "./tier-migration.js";
 import { decideTierTransition, type MemoryTier } from "./tier-routing.js";
 import { selectRouteRule, type RouteRule, type RoutingEngineOptions } from "./routing/engine.js";
 import { RoutingRulesStore } from "./routing/store.js";
+import {
+  buildBehaviorSignalsForMemory,
+  dedupeBehaviorSignalsByMemoryAndHash,
+} from "./behavior-signals.js";
 import type {
   AccessTrackingEntry,
+  BehaviorSignalEvent,
   BootstrapOptions,
   BootstrapResult,
   BufferTurn,
@@ -3145,6 +3150,17 @@ export class Orchestrator {
       persistedIdsByStorage.set(key, { storage: targetStorage, ids: [id] });
     };
     let dedupedCount = 0;
+    const behaviorSignalsByStorage = new Map<string, { storage: StorageManager; events: BehaviorSignalEvent[] }>();
+    const trackBehaviorSignals = (targetStorage: StorageManager, events: BehaviorSignalEvent[]): void => {
+      if (events.length === 0) return;
+      const key = targetStorage.dir;
+      const existing = behaviorSignalsByStorage.get(key);
+      if (existing) {
+        existing.events.push(...events);
+        return;
+      }
+      behaviorSignalsByStorage.set(key, { storage: targetStorage, events: [...events] });
+    };
 
     // Defensive: validate result and facts array
     if (!result || !Array.isArray(result.facts)) {
@@ -3390,6 +3406,17 @@ export class Orchestrator {
               graphContext.previousPersistedRelPath = parentRelPath;
             } catch { /* fail-open */ }
           }
+          trackBehaviorSignals(
+            targetStorage,
+            buildBehaviorSignalsForMemory({
+              memoryId: parentId,
+              category: writeCategory,
+              content: fact.content,
+              namespace: this.namespaceFromStorageDir(targetStorage.dir),
+              confidence: fact.confidence,
+              source: "extraction",
+            }),
+          );
           continue; // Skip the normal write below
         }
       }
@@ -3463,6 +3490,17 @@ export class Orchestrator {
           `routing applied for memory ${memoryId}: rule=${routedRuleId} category=${writeCategory} storage=${targetStorage.dir}`,
         );
       }
+      trackBehaviorSignals(
+        targetStorage,
+        buildBehaviorSignalsForMemory({
+          memoryId,
+          category: writeCategory,
+          content: fact.content,
+          namespace: this.namespaceFromStorageDir(targetStorage.dir),
+          confidence: fact.confidence,
+          source: "extraction",
+        }),
+      );
       trackPersistedId(targetStorage, memoryId);
       if (threadEpisodeIdsForGraph && !threadEpisodeIdsForGraph.includes(memoryId)) {
         threadEpisodeIdsForGraph.push(memoryId);
@@ -3600,6 +3638,14 @@ export class Orchestrator {
       await this.contentHashIndex.save().catch((err) =>
         log.warn(`content-hash index save failed: ${err}`),
       );
+    }
+
+    for (const { storage: targetStorage, events } of behaviorSignalsByStorage.values()) {
+      const dedupedSignals = dedupeBehaviorSignalsByMemoryAndHash(events);
+      if (dedupedSignals.length === 0) continue;
+      await targetStorage
+        .appendBehaviorSignals(dedupedSignals)
+        .catch((err) => log.warn(`appendBehaviorSignals failed (non-fatal): ${err}`));
     }
 
     const dedupSuffix = dedupedCount > 0 ? ` (${dedupedCount} deduped)` : "";

@@ -33,6 +33,11 @@ All notable changes to this project will be documented in this file.
   - Added behavior-loop auto-tuning config keys with bounded defaults and explicit zero-safe parsing semantics.
   - Added typed behavior-loop policy contracts in `src/types.ts` and corresponding Zod schemas in `src/schemas.ts`.
   - Extended `tests/config-proactive-policy.test.ts` to cover defaults, explicit zero overrides, and numeric clamping for behavior-loop settings.
+- v8.15 behavior-loop Task 2 (signal ingestion pipeline):
+  - Added `src/behavior-signals.ts` for correction/preference signal normalization and deterministic dedupe keys.
+  - Added append-only behavior signal ledger support in storage (`state/behavior-signals.jsonl`) with fail-open reads and persisted dedupe by `memoryId+signalHash`.
+  - Wired extraction persistence to emit namespace-safe correction/preference behavior signals per target storage namespace.
+  - Added `tests/behavior-signals.test.ts` and expanded `tests/storage-policy-state.test.ts` for signal generation, timestamp/namespace safety, and dedupe invariants.
 - v8.8 network sync Task 1 (WebDAV module):
   - Added `src/network/webdav.ts` with opt-in `WebDavServer` startup (`enabled=false` by default).
   - Added strict allowlist path scoping so requests are limited to explicit root aliases and traversal escapes are rejected.

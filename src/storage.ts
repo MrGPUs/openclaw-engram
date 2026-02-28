@@ -29,6 +29,7 @@ import type {
   PolicyClass,
   MemoryStatus,
   MemoryActionEvent,
+  BehaviorSignalEvent,
   MemorySummary,
   MetaState,
   CompressionGuidelineOptimizerState,
@@ -728,6 +729,9 @@ export class StorageManager {
   }
   private get compressionGuidelineStatePath(): string {
     return path.join(this.stateDir, "compression-guideline-state.json");
+  }
+  private get behaviorSignalsPath(): string {
+    return path.join(this.stateDir, "behavior-signals.jsonl");
   }
 
   /**
@@ -1568,6 +1572,84 @@ export class StorageManager {
 
     await appendFile(this.memoryActionsPath, payload, "utf-8");
     return events.length;
+  }
+
+  async appendBehaviorSignals(events: BehaviorSignalEvent[]): Promise<number> {
+    if (events.length === 0) return 0;
+    await this.ensureDirectories();
+
+    let existingKeys = new Set<string>();
+    try {
+      const raw = await readFile(this.behaviorSignalsPath, "utf-8");
+      const lines = raw.split("\n");
+      for (const line of lines) {
+        const row = line.trim();
+        if (!row) continue;
+        try {
+          const parsed = JSON.parse(row) as Partial<BehaviorSignalEvent>;
+          if (typeof parsed.memoryId === "string" && typeof parsed.signalHash === "string") {
+            existingKeys.add(`${parsed.memoryId}:${parsed.signalHash}`);
+          }
+        } catch {
+          // Ignore malformed rows (fail-open).
+        }
+      }
+    } catch {
+      existingKeys = new Set<string>();
+    }
+
+    const nowIso = new Date().toISOString();
+    const deduped: BehaviorSignalEvent[] = [];
+    for (const event of events) {
+      const key = `${event.memoryId}:${event.signalHash}`;
+      if (existingKeys.has(key)) continue;
+      existingKeys.add(key);
+      deduped.push({
+        ...event,
+        timestamp: event.timestamp && event.timestamp.length > 0 ? event.timestamp : nowIso,
+      });
+    }
+
+    if (deduped.length === 0) return 0;
+    const payload = deduped.map((event) => `${JSON.stringify(event)}\n`).join("");
+    await appendFile(this.behaviorSignalsPath, payload, "utf-8");
+    return deduped.length;
+  }
+
+  async readBehaviorSignals(limit: number = 200): Promise<BehaviorSignalEvent[]> {
+    const cappedLimit = Math.max(0, Math.floor(limit));
+    if (cappedLimit === 0) return [];
+
+    try {
+      const raw = await readFile(this.behaviorSignalsPath, "utf-8");
+      const out: BehaviorSignalEvent[] = [];
+      const lines = raw.split("\n");
+      for (let i = lines.length - 1; i >= 0 && out.length < cappedLimit; i -= 1) {
+        const row = lines[i]?.trim();
+        if (!row) continue;
+        try {
+          const parsed = JSON.parse(row) as Partial<BehaviorSignalEvent>;
+          if (
+            typeof parsed.timestamp === "string" &&
+            typeof parsed.namespace === "string" &&
+            typeof parsed.memoryId === "string" &&
+            typeof parsed.category === "string" &&
+            typeof parsed.signalType === "string" &&
+            typeof parsed.direction === "string" &&
+            typeof parsed.confidence === "number" &&
+            typeof parsed.signalHash === "string" &&
+            typeof parsed.source === "string"
+          ) {
+            out.push(parsed as BehaviorSignalEvent);
+          }
+        } catch {
+          // Ignore malformed rows (fail-open).
+        }
+      }
+      return out.reverse();
+    } catch {
+      return [];
+    }
   }
 
   async readMemoryActionEvents(limit: number = 200): Promise<MemoryActionEvent[]> {
