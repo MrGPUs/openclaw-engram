@@ -169,3 +169,52 @@ test("learner treats maxDeltaPerCycle=0 as hard no-op for all parameters", () =>
 
   assert.equal(state.adjustments.length, 0);
 });
+
+test("token cap learning is symmetric at small delta budgets", () => {
+  const positiveSignals = Array.from({ length: 20 }, (_, idx) =>
+    signal({
+      memoryId: `p-${idx}`,
+      signalHash: `p-${idx}`,
+      direction: "positive",
+    }),
+  );
+  const negativeSignals = Array.from({ length: 20 }, (_, idx) =>
+    signal({
+      memoryId: `n-${idx}`,
+      signalHash: `n-${idx}`,
+      direction: "negative",
+      category: "correction",
+      signalType: "correction_override",
+    }),
+  );
+
+  const commonInput = {
+    learningWindowDays: 14,
+    minSignalCount: 10,
+    maxDeltaPerCycle: 0.03,
+    protectedParams: [],
+    currentPolicy: {
+      recencyWeight: 0.2,
+      lifecyclePromoteHeatThreshold: 0.55,
+      lifecycleStaleDecayThreshold: 0.65,
+      cronRecallInstructionHeavyTokenCap: 24,
+    },
+    now: new Date("2026-02-28T00:00:00.000Z"),
+  };
+
+  const positive = learnBehaviorPolicyAdjustments({
+    ...commonInput,
+    signals: positiveSignals,
+  });
+  const negative = learnBehaviorPolicyAdjustments({
+    ...commonInput,
+    signals: negativeSignals,
+  });
+
+  const up = positive.adjustments.find((a) => a.parameter === "cronRecallInstructionHeavyTokenCap");
+  const down = negative.adjustments.find((a) => a.parameter === "cronRecallInstructionHeavyTokenCap");
+  assert.ok(up);
+  assert.ok(down);
+  assert.equal(up.nextValue, 25);
+  assert.equal(down.nextValue, 23);
+});

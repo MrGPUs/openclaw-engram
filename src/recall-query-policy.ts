@@ -170,7 +170,7 @@ function buildInstructionHeavyQuery(
 
 export function clampInstructionHeavyTokenCap(value: number): number {
   if (!Number.isFinite(value)) return 8;
-  return Math.max(8, Math.floor(value));
+  return Math.max(8, Math.round(value));
 }
 
 function buildStandardQuery(prompt: string, maxChars: number): string {
