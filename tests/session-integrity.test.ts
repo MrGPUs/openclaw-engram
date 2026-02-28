@@ -87,6 +87,8 @@ test("session repair apply rewrites transcript and removes bad checkpoint", asyn
   await writeFile(checkpointPath, "{bad-json", "utf-8");
 
   const report = await analyzeSessionIntegrity({ memoryDir });
+  const sessionStats = report.sessions.find((session) => session.sessionKey === "agent:generalist:main");
+  assert.equal(sessionStats?.invalidEntries, 1);
   const plan = planSessionRepair({
     report,
     dryRun: false,

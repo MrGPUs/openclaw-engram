@@ -57,6 +57,7 @@ type FileSessionParse = {
   bySession: Map<string, SessionEntryRef[]>;
   malformed: SessionIntegrityIssue[];
   invalid: SessionIntegrityIssue[];
+  invalidBySession: Map<string, number>;
 };
 
 export interface SessionRepairAction {
@@ -142,12 +143,13 @@ async function parseTranscriptFile(filePath: string): Promise<FileSessionParse> 
   const bySession = new Map<string, SessionEntryRef[]>();
   const malformed: SessionIntegrityIssue[] = [];
   const invalid: SessionIntegrityIssue[] = [];
+  const invalidBySession = new Map<string, number>();
 
   let raw = "";
   try {
     raw = await readFile(filePath, "utf-8");
   } catch {
-    return { bySession, malformed, invalid };
+    return { bySession, malformed, invalid, invalidBySession };
   }
 
   const lines = raw.split("\n");
@@ -168,13 +170,23 @@ async function parseTranscriptFile(filePath: string): Promise<FileSessionParse> 
       continue;
     }
     if (!isTranscriptEntry(parsed)) {
+      const sessionKey =
+        isObjectRecord(parsed) &&
+        typeof parsed.sessionKey === "string" &&
+        parsed.sessionKey.length > 0
+          ? parsed.sessionKey
+          : undefined;
       invalid.push({
         code: "transcript_invalid_entry",
         severity: "warn",
         message: "Transcript entry is missing required fields.",
         filePath,
         line: index + 1,
+        sessionKey,
       });
+      if (sessionKey) {
+        invalidBySession.set(sessionKey, (invalidBySession.get(sessionKey) ?? 0) + 1);
+      }
       continue;
     }
 
@@ -182,7 +194,7 @@ async function parseTranscriptFile(filePath: string): Promise<FileSessionParse> 
     list.push({ filePath, lineNumber: index + 1, entry: parsed });
     bySession.set(parsed.sessionKey, list);
   }
-  return { bySession, malformed, invalid };
+  return { bySession, malformed, invalid, invalidBySession };
 }
 
 function analyzeSessionEntries(
@@ -382,12 +394,16 @@ export async function analyzeSessionIntegrity(
   const memoryDir = options.memoryDir;
   const reportIssues: SessionIntegrityIssue[] = [];
   const allSessionRefs = new Map<string, SessionEntryRef[]>();
+  const invalidBySession = new Map<string, number>();
   const sessions = new Map<string, SessionTranscriptStats>();
 
   const files = await listTranscriptFiles(memoryDir);
   for (const filePath of files) {
     const parsed = await parseTranscriptFile(filePath);
     reportIssues.push(...parsed.malformed, ...parsed.invalid);
+    for (const [sessionKey, count] of parsed.invalidBySession.entries()) {
+      invalidBySession.set(sessionKey, (invalidBySession.get(sessionKey) ?? 0) + count);
+    }
 
     for (const [sessionKey, refs] of parsed.bySession.entries()) {
       const existing = allSessionRefs.get(sessionKey) ?? [];
@@ -402,7 +418,7 @@ export async function analyzeSessionIntegrity(
     sessions.set(sessionKey, {
       ...analyzed.stats,
       malformedLines: 0,
-      invalidEntries: 0,
+      invalidEntries: invalidBySession.get(sessionKey) ?? 0,
     });
   }
 
