@@ -10,6 +10,28 @@ export type CronRecallMode = "all" | "none" | "allowlist";
 export type CronConversationRecallMode = "auto" | "always" | "never";
 export type IdentityInjectionMode = "recovery_only" | "minimal" | "full";
 
+export interface RecallSectionConfig {
+  id: string;
+  enabled?: boolean;
+  maxChars?: number | null;
+  consolidateTriggerLines?: number;
+  consolidateTargetLines?: number;
+  maxEntities?: number;
+  maxResults?: number;
+  maxTurns?: number;
+  maxTokens?: number;
+  lookbackHours?: number;
+  maxCount?: number;
+  topK?: number;
+  timeoutMs?: number;
+  maxPatterns?: number;
+}
+
+export interface RecallPipelineConfig {
+  recallBudgetChars: number;
+  pipeline: RecallSectionConfig[];
+}
+
 export interface SessionObserverBandConfig {
   maxBytes: number;
   triggerDeltaBytes: number;
@@ -287,6 +309,9 @@ export interface PluginConfig {
   knowledgeIndexEnabled: boolean;
   knowledgeIndexMaxEntities: number;
   knowledgeIndexMaxChars: number;
+  // Recall assembly controls
+  recallBudgetChars: number;
+  recallPipeline: RecallSectionConfig[];
   entityRelationshipsEnabled: boolean;
   entityActivityLogEnabled: boolean;
   entityActivityLogMaxEntries: number;

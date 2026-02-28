@@ -56,6 +56,40 @@ All settings live in `openclaw.json` under `plugins.entries.openclaw-engram.conf
 | `knowledgeIndexEnabled` | `true` | Inject entity/topic index into recall context |
 | `knowledgeIndexMaxEntities` | `40` | Max entities included in the knowledge index |
 | `knowledgeIndexMaxChars` | `4000` | Max characters of knowledge index injected |
+| `recallBudgetChars` | `maxMemoryTokens * 4` | Hard cap for total assembled recall context (final safety trim before system prompt injection) |
+| `recallPipeline` | `(built-in ordered defaults)` | Ordered section controls for recall assembly, including per-section caps and knobs |
+
+### `recallPipeline` entries
+
+`recallPipeline` is an array of section entries:
+
+```json
+{
+  "id": "knowledge-index",
+  "enabled": true,
+  "maxChars": 3000,
+  "maxEntities": 25
+}
+```
+
+Supported keys:
+
+| Key | Type | Notes |
+|-----|------|-------|
+| `id` | `string` | Section identifier (required) |
+| `enabled` | `boolean` | Enable/disable the section |
+| `maxChars` | `number \| null` | Per-section char cap (`null` = uncapped by section) |
+| `consolidateTriggerLines` | `number` | `profile` section only; profile consolidation trigger line count |
+| `consolidateTargetLines` | `number` | `profile` section only; consolidation target line count |
+| `maxEntities` | `number` | `knowledge-index` section only; per-section entity cap |
+| `maxResults` | `number` | `memories` section only; cap injected memory result count |
+| `maxTurns` | `number` | `transcript` section only |
+| `maxTokens` | `number` | `transcript` section only |
+| `lookbackHours` | `number` | `transcript` / `summaries` section only |
+| `maxCount` | `number` | `summaries` section only |
+| `topK` | `number` | `conversation-recall` section only |
+| `timeoutMs` | `number` | `conversation-recall` section only |
+| `maxPatterns` | `number` | `compounding` section only |
 
 ## v8.0 Memory OS
 
