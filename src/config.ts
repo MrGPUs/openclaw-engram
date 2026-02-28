@@ -3,6 +3,8 @@ import type {
   IdentityInjectionMode,
   PluginConfig,
   PrincipalRule,
+  RecallPipelineConfig,
+  RecallSectionConfig,
   ReasoningEffort,
   SessionObserverBandConfig,
   TriggerMode,
@@ -215,6 +217,7 @@ export function parseConfig(raw: unknown): PluginConfig {
       : typeof cfg.crossSignalsSemanticTimeoutMs === "number"
         ? Math.max(1, Math.floor(cfg.crossSignalsSemanticTimeoutMs))
         : 4000;
+  const recallPipelineConfig = buildRecallPipelineConfig(cfg);
 
   return {
     openaiApiKey: apiKey,
@@ -652,6 +655,8 @@ export function parseConfig(raw: unknown): PluginConfig {
       typeof cfg.knowledgeIndexMaxEntities === "number" ? cfg.knowledgeIndexMaxEntities : 40,
     knowledgeIndexMaxChars:
       typeof cfg.knowledgeIndexMaxChars === "number" ? cfg.knowledgeIndexMaxChars : 4000,
+    recallBudgetChars: recallPipelineConfig.recallBudgetChars,
+    recallPipeline: recallPipelineConfig.pipeline,
     entityRelationshipsEnabled: cfg.entityRelationshipsEnabled !== false,
     entityActivityLogEnabled: cfg.entityActivityLogEnabled !== false,
     entityActivityLogMaxEntries:
@@ -828,4 +833,151 @@ export function parseConfig(raw: unknown): PluginConfig {
     tmtSummaryMaxTokens:
       typeof cfg.tmtSummaryMaxTokens === "number" ? cfg.tmtSummaryMaxTokens : 300,
   };
+}
+
+function clampNonNegativeNumber(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
+  return Math.max(0, Math.floor(value));
+}
+
+function parseRecallSectionEntry(raw: unknown): RecallSectionConfig {
+  const entry =
+    raw && typeof raw === "object" && !Array.isArray(raw)
+      ? (raw as Record<string, unknown>)
+      : {};
+  return {
+    id: typeof entry.id === "string" ? entry.id.trim() : "",
+    enabled: entry.enabled !== false,
+    maxChars:
+      entry.maxChars === null
+        ? null
+        : clampNonNegativeNumber(entry.maxChars),
+    consolidateTriggerLines: clampNonNegativeNumber(entry.consolidateTriggerLines),
+    consolidateTargetLines: clampNonNegativeNumber(entry.consolidateTargetLines),
+    maxEntities: clampNonNegativeNumber(entry.maxEntities),
+    maxResults: clampNonNegativeNumber(entry.maxResults),
+    maxTurns: clampNonNegativeNumber(entry.maxTurns),
+    maxTokens: clampNonNegativeNumber(entry.maxTokens),
+    lookbackHours: clampNonNegativeNumber(entry.lookbackHours),
+    maxCount: clampNonNegativeNumber(entry.maxCount),
+    topK: clampNonNegativeNumber(entry.topK),
+    timeoutMs: clampNonNegativeNumber(entry.timeoutMs),
+    maxPatterns: clampNonNegativeNumber(entry.maxPatterns),
+  };
+}
+
+function buildDefaultRecallPipeline(cfg: Record<string, unknown>): RecallSectionConfig[] {
+  return [
+    {
+      id: "shared-context",
+      enabled: cfg.sharedContextEnabled === true,
+      maxChars:
+        typeof cfg.sharedContextMaxInjectChars === "number"
+          ? Math.max(0, Math.floor(cfg.sharedContextMaxInjectChars))
+          : 4000,
+    },
+    {
+      id: "profile",
+      enabled: true,
+      consolidateTriggerLines: 100,
+      consolidateTargetLines: 50,
+    },
+    {
+      id: "identity-continuity",
+      enabled: cfg.identityContinuityEnabled === true,
+    },
+    {
+      id: "knowledge-index",
+      enabled: cfg.knowledgeIndexEnabled !== false,
+      maxChars:
+        typeof cfg.knowledgeIndexMaxChars === "number"
+          ? Math.max(0, Math.floor(cfg.knowledgeIndexMaxChars))
+          : 4000,
+      maxEntities:
+        typeof cfg.knowledgeIndexMaxEntities === "number"
+          ? Math.max(0, Math.floor(cfg.knowledgeIndexMaxEntities))
+          : 40,
+    },
+    { id: "verbatim-artifacts", enabled: cfg.verbatimArtifactsEnabled === true },
+    { id: "memory-boxes", enabled: cfg.memoryBoxesEnabled === true },
+    { id: "temporal-memory-tree", enabled: cfg.temporalMemoryTreeEnabled === true },
+    {
+      id: "memories",
+      enabled: true,
+      maxResults:
+        typeof cfg.qmdMaxResults === "number"
+          ? Math.max(0, Math.floor(cfg.qmdMaxResults))
+          : 8,
+    },
+    {
+      id: "compression-guidelines",
+      enabled: cfg.compressionGuidelineLearningEnabled === true,
+    },
+    {
+      id: "transcript",
+      enabled: cfg.transcriptEnabled !== false,
+      maxTurns:
+        typeof cfg.maxTranscriptTurns === "number"
+          ? Math.max(0, Math.floor(cfg.maxTranscriptTurns))
+          : 50,
+      maxTokens:
+        typeof cfg.maxTranscriptTokens === "number"
+          ? Math.max(0, Math.floor(cfg.maxTranscriptTokens))
+          : 1000,
+      lookbackHours:
+        typeof cfg.transcriptRecallHours === "number"
+          ? Math.max(0, Math.floor(cfg.transcriptRecallHours))
+          : 12,
+    },
+    {
+      id: "summaries",
+      enabled: cfg.hourlySummariesEnabled !== false,
+      maxCount:
+        typeof cfg.maxSummaryCount === "number"
+          ? Math.max(0, Math.floor(cfg.maxSummaryCount))
+          : 6,
+      lookbackHours:
+        typeof cfg.summaryRecallHours === "number"
+          ? Math.max(0, Math.floor(cfg.summaryRecallHours))
+          : 24,
+    },
+    {
+      id: "conversation-recall",
+      enabled: cfg.conversationIndexEnabled === true,
+      topK:
+        typeof cfg.conversationRecallTopK === "number"
+          ? Math.max(0, Math.floor(cfg.conversationRecallTopK))
+          : 3,
+      maxChars:
+        typeof cfg.conversationRecallMaxChars === "number"
+          ? Math.max(0, Math.floor(cfg.conversationRecallMaxChars))
+          : 2500,
+      timeoutMs:
+        typeof cfg.conversationRecallTimeoutMs === "number"
+          ? Math.max(0, Math.floor(cfg.conversationRecallTimeoutMs))
+          : 800,
+    },
+    {
+      id: "compounding",
+      enabled: cfg.compoundingEnabled === true && cfg.compoundingInjectEnabled !== false,
+      maxPatterns: 40,
+    },
+    { id: "questions", enabled: cfg.injectQuestions === true },
+  ];
+}
+
+function buildRecallPipelineConfig(cfg: Record<string, unknown>): RecallPipelineConfig {
+  const maxMemoryTokens =
+    typeof cfg.maxMemoryTokens === "number"
+      ? Math.max(0, Math.floor(cfg.maxMemoryTokens))
+      : 2000;
+  const recallBudgetCharsRaw = clampNonNegativeNumber(cfg.recallBudgetChars);
+  const recallBudgetChars = recallBudgetCharsRaw ?? maxMemoryTokens * 4;
+
+  const rawPipeline = cfg.recallPipeline;
+  const pipeline = Array.isArray(rawPipeline)
+    ? rawPipeline.map(parseRecallSectionEntry).filter((entry) => entry.id.length > 0)
+    : buildDefaultRecallPipeline(cfg);
+
+  return { recallBudgetChars, pipeline };
 }

@@ -1393,6 +1393,34 @@
         "type": "boolean",
         "default": true,
         "description": "Generate LLM summaries for entities during consolidation"
+      },
+      "recallBudgetChars": {
+        "type": "number",
+        "description": "Hard character cap for total recall injection. Defaults to maxMemoryTokens * 4."
+      },
+      "recallPipeline": {
+        "type": "array",
+        "description": "Ordered recall sections with per-section budgets and feature knobs.",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": { "type": "string" },
+            "enabled": { "type": "boolean", "default": true },
+            "maxChars": { "type": ["number", "null"] },
+            "consolidateTriggerLines": { "type": "number" },
+            "consolidateTargetLines": { "type": "number" },
+            "maxEntities": { "type": "number" },
+            "maxResults": { "type": "number" },
+            "maxTurns": { "type": "number" },
+            "maxTokens": { "type": "number" },
+            "lookbackHours": { "type": "number" },
+            "maxCount": { "type": "number" },
+            "topK": { "type": "number" },
+            "timeoutMs": { "type": "number" },
+            "maxPatterns": { "type": "number" }
+          },
+          "required": ["id"]
+        }
       }
     }
   },
@@ -1968,6 +1996,16 @@
     "entitySummaryEnabled": {
       "label": "Entity Summaries",
       "help": "Generate LLM summaries for entities during consolidation"
+    },
+    "recallBudgetChars": {
+      "label": "Recall Budget (Chars)",
+      "advanced": true,
+      "placeholder": "8000"
+    },
+    "recallPipeline": {
+      "label": "Recall Pipeline",
+      "advanced": true,
+      "help": "Ordered section configuration for recall assembly and per-section limits"
     }
   }
 }

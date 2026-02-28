@@ -1108,11 +1108,14 @@ export class StorageManager {
   }
 
   /** Check if profile.md exceeds the max line cap and needs LLM consolidation */
-  async profileNeedsConsolidation(): Promise<boolean> {
+  async profileNeedsConsolidation(triggerLines?: number): Promise<boolean> {
     const profile = await this.readProfile();
     if (!profile) return false;
     const lineCount = profile.split("\n").length;
-    return lineCount > StorageManager.PROFILE_MAX_LINES;
+    const threshold = typeof triggerLines === "number"
+      ? Math.max(0, Math.floor(triggerLines))
+      : StorageManager.PROFILE_MAX_LINES;
+    return lineCount > threshold;
   }
 
   async readAllMemories(): Promise<MemoryFile[]> {
@@ -2375,9 +2378,16 @@ export class StorageManager {
    * Build the Knowledge Index: a compact markdown table of top-scored entities.
    * Respects maxEntities and maxChars limits from config.
    */
-  async buildKnowledgeIndex(config: PluginConfig): Promise<{ result: string; cached: boolean }> {
+  async buildKnowledgeIndex(
+    config: PluginConfig,
+    overrides?: { maxEntities?: number; maxChars?: number },
+  ): Promise<{ result: string; cached: boolean }> {
+    const useDefaultLimits =
+      overrides?.maxEntities === undefined &&
+      overrides?.maxChars === undefined;
     // Return cached index if still fresh
     if (
+      useDefaultLimits &&
       this.knowledgeIndexCache &&
       Date.now() - this.knowledgeIndexCache.builtAt < StorageManager.KNOWLEDGE_INDEX_CACHE_TTL_MS
     ) {
@@ -2386,7 +2396,7 @@ export class StorageManager {
 
     const entities = await this.readAllEntityFiles();
     if (entities.length === 0) {
-      this.knowledgeIndexCache = { result: "", builtAt: Date.now() };
+      if (useDefaultLimits) this.knowledgeIndexCache = { result: "", builtAt: Date.now() };
       return { result: "", cached: false };
     }
 
@@ -2402,10 +2412,13 @@ export class StorageManager {
 
     // Sort by score descending, take top N
     scored.sort((a, b) => b.score - a.score);
-    const topN = scored.slice(0, config.knowledgeIndexMaxEntities);
+    const maxEntities = typeof overrides?.maxEntities === "number"
+      ? Math.max(0, Math.floor(overrides.maxEntities))
+      : config.knowledgeIndexMaxEntities;
+    const topN = scored.slice(0, maxEntities);
 
     if (topN.length === 0) {
-      this.knowledgeIndexCache = { result: "", builtAt: Date.now() };
+      if (useDefaultLimits) this.knowledgeIndexCache = { result: "", builtAt: Date.now() };
       return { result: "", cached: false };
     }
 
@@ -2413,6 +2426,9 @@ export class StorageManager {
     const header = "## Knowledge Index\n\n| Entity | Type | Summary | Connected to |\n|--------|------|---------|-------------|";
     const rows: string[] = [];
     let totalChars = header.length;
+    const maxChars = typeof overrides?.maxChars === "number"
+      ? Math.max(0, Math.floor(overrides.maxChars))
+      : config.knowledgeIndexMaxChars;
 
     for (const entity of topN) {
       const summary = entity.summary || `${entity.factCount} facts`;
@@ -2421,13 +2437,13 @@ export class StorageManager {
         : "—";
       const row = `| ${entity.name} | ${entity.type} | ${summary} | ${connected} |`;
 
-      if (totalChars + row.length + 1 > config.knowledgeIndexMaxChars) break;
+      if (totalChars + row.length + 1 > maxChars) break;
       rows.push(row);
       totalChars += row.length + 1;
     }
 
     const result = rows.length === 0 ? "" : `${header}\n${rows.join("\n")}\n`;
-    this.knowledgeIndexCache = { result, builtAt: Date.now() };
+    if (useDefaultLimits) this.knowledgeIndexCache = { result, builtAt: Date.now() };
     return { result, cached: false };
   }
 

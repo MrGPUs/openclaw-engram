@@ -116,6 +116,7 @@ import type {
   PluginConfig,
   QmdSearchResult,
   RecallPlanMode,
+  RecallSectionConfig,
 } from "./types.js";
 
 export interface GraphRecallSnapshot {
@@ -1775,11 +1776,87 @@ export class Orchestrator {
     }
   }
 
+  private getRecallSectionEntry(sectionId: string): RecallSectionConfig | undefined {
+    const pipeline = Array.isArray(this.config.recallPipeline)
+      ? this.config.recallPipeline
+      : [];
+    return pipeline.find((entry) => entry.id === sectionId);
+  }
+
+  private isRecallSectionEnabled(sectionId: string, defaultEnabled: boolean = true): boolean {
+    const entry = this.getRecallSectionEntry(sectionId);
+    if (!entry) return defaultEnabled;
+    return entry.enabled !== false;
+  }
+
+  private getRecallSectionMaxChars(sectionId: string): number | null | undefined {
+    const entry = this.getRecallSectionEntry(sectionId);
+    if (!entry) return undefined;
+    if (entry.maxChars === null) return null;
+    if (typeof entry.maxChars !== "number") return undefined;
+    return Math.max(0, Math.floor(entry.maxChars));
+  }
+
+  private getRecallSectionNumber(sectionId: string, key: keyof RecallSectionConfig): number | undefined {
+    const entry = this.getRecallSectionEntry(sectionId);
+    if (!entry) return undefined;
+    const value = entry[key];
+    if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
+    return Math.max(0, Math.floor(value));
+  }
+
+  private appendRecallSection(
+    sectionBuckets: Map<string, string[]>,
+    sectionId: string,
+    content: string,
+  ): void {
+    if (!this.isRecallSectionEnabled(sectionId)) return;
+    const trimmed = content.trim();
+    if (trimmed.length === 0) return;
+
+    const maxChars = this.getRecallSectionMaxChars(sectionId);
+    let finalContent = trimmed;
+    if (maxChars === 0) return;
+    if (typeof maxChars === "number" && finalContent.length > maxChars) {
+      finalContent = `${finalContent.slice(0, maxChars)}\n\n...(trimmed)\n`;
+    }
+
+    const existing = sectionBuckets.get(sectionId) ?? [];
+    existing.push(finalContent);
+    sectionBuckets.set(sectionId, existing);
+  }
+
+  private assembleRecallSections(sectionBuckets: Map<string, string[]>): string[] {
+    const ordered: string[] = [];
+    const pipeline = Array.isArray(this.config.recallPipeline)
+      ? this.config.recallPipeline
+      : [];
+    const orderedIds = pipeline
+      .filter((entry) => entry.enabled !== false)
+      .map((entry) => entry.id);
+    const seen = new Set<string>();
+
+    for (const id of orderedIds) {
+      const chunks = sectionBuckets.get(id);
+      if (!chunks || chunks.length === 0) continue;
+      ordered.push(chunks.join("\n\n"));
+      seen.add(id);
+    }
+
+    for (const [id, chunks] of sectionBuckets.entries()) {
+      if (seen.has(id)) continue;
+      if (chunks.length === 0) continue;
+      ordered.push(chunks.join("\n\n"));
+    }
+
+    return ordered;
+  }
+
   private async recallInternal(prompt: string, sessionKey?: string): Promise<string> {
     const recallStart = Date.now();
     const timings: Record<string, string> = {};
     const promptHash = createHash("sha256").update(prompt).digest("hex");
-    const sections: string[] = [];
+    const sectionBuckets = new Map<string, string[]>();
     const queryPolicy = buildRecallQueryPolicy(prompt, sessionKey, {
       cronRecallPolicyEnabled: this.config.cronRecallPolicyEnabled,
       cronRecallNormalizedQueryMaxChars: this.config.cronRecallNormalizedQueryMaxChars,
@@ -1813,10 +1890,17 @@ export class Orchestrator {
       0,
       Math.min(this.config.qmdMaxResults, this.config.recallPlannerMaxQmdResultsMinimal),
     );
-    const recallResultLimit =
+    const baseRecallResultLimit =
       recallMode !== "no_recall" && queryPolicy.retrievalBudgetMode === "minimal"
         ? Math.min(plannerRecallResultLimit, policyMinimalLimit)
         : plannerRecallResultLimit;
+    const memoriesSectionEnabled = this.isRecallSectionEnabled("memories");
+    const memorySectionMaxResults = this.getRecallSectionNumber("memories", "maxResults");
+    const recallResultLimit = memoriesSectionEnabled
+      ? memorySectionMaxResults !== undefined
+        ? Math.min(baseRecallResultLimit, memorySectionMaxResults)
+        : baseRecallResultLimit
+      : 0;
     const recallHeadroom = this.config.verbatimArtifactsEnabled
       ? Math.max(12, this.config.verbatimArtifactsMaxRecall * 4)
       : 12;
@@ -1873,6 +1957,7 @@ export class Orchestrator {
 
     // 0. Shared context (v4.0, optional)
     const sharedContextPromise = (async (): Promise<string | null> => {
+      if (!this.isRecallSectionEnabled("shared-context", this.config.sharedContextEnabled === true)) return null;
       if (!this.sharedContext) return null;
       const t0 = Date.now();
       const [priorities, roundtable] = await Promise.all([
@@ -1898,6 +1983,7 @@ export class Orchestrator {
 
     // 1. Profile
     const profilePromise = (async (): Promise<string | null> => {
+      if (!this.isRecallSectionEnabled("profile")) return null;
       const t0 = Date.now();
       const profile = await profileStorage.readProfile();
       timings.profile = `${Date.now() - t0}ms`;
@@ -1906,6 +1992,7 @@ export class Orchestrator {
 
     // 1a. Identity continuity signals (v8.4)
     const identityContinuityPromise = (async () => {
+      if (!this.isRecallSectionEnabled("identity-continuity", this.config.identityContinuityEnabled === true)) return null;
       const t0 = Date.now();
       const section = await this.buildIdentityContinuitySection({
         storage: profileStorage,
@@ -1918,10 +2005,14 @@ export class Orchestrator {
 
     // 1b. Knowledge Index (v7.0)
     const knowledgeIndexPromise = (async (): Promise<{ result: string; cached: boolean } | null> => {
+      if (!this.isRecallSectionEnabled("knowledge-index", this.config.knowledgeIndexEnabled)) return null;
       if (!this.config.knowledgeIndexEnabled) return null;
       const t0 = Date.now();
       try {
-        const ki = await this.storage.buildKnowledgeIndex(this.config);
+        const ki = await this.storage.buildKnowledgeIndex(this.config, {
+          maxEntities: this.getRecallSectionNumber("knowledge-index", "maxEntities"),
+          maxChars: this.getRecallSectionNumber("knowledge-index", "maxChars"),
+        });
         timings.ki = `${Date.now() - t0}ms${ki.cached ? " (cached)" : ""}`;
         return ki.result ? ki : null;
       } catch (err) {
@@ -1933,6 +2024,7 @@ export class Orchestrator {
 
     // 1c. Verbatim artifacts (v8.0 phase 1)
     const artifactsPromise = (async (): Promise<MemoryFile[]> => {
+      if (!this.isRecallSectionEnabled("verbatim-artifacts", this.config.verbatimArtifactsEnabled === true)) return [];
       if (!this.config.verbatimArtifactsEnabled) return [];
       const t0 = Date.now();
       const targetCount = computeArtifactRecallLimit(
@@ -1989,27 +2081,193 @@ export class Orchestrator {
       return { memoryResultsLists: [filteredResults], globalResults: [] };
     })();
 
+    const transcriptPromise = (async (): Promise<string | null> => {
+      const t0 = Date.now();
+      if (!this.config.transcriptEnabled || !this.isRecallSectionEnabled("transcript", true)) {
+        timings.transcript = "skip";
+        return null;
+      }
+      const transcriptMaxTokens = this.getRecallSectionNumber("transcript", "maxTokens")
+        ?? this.config.maxTranscriptTokens;
+      const transcriptMaxTurns = this.getRecallSectionNumber("transcript", "maxTurns")
+        ?? this.config.maxTranscriptTurns;
+      const transcriptLookbackHours = this.getRecallSectionNumber("transcript", "lookbackHours")
+        ?? this.config.transcriptRecallHours;
+      if (transcriptMaxTokens === 0 || transcriptMaxTurns === 0 || transcriptLookbackHours === 0) {
+        timings.transcript = "skip(limit=0)";
+        return null;
+      }
+
+      let section: string | null = null;
+      // Try checkpoint first (post-compaction recovery)
+      let checkpointInjected = false;
+      if (this.config.checkpointEnabled) {
+        const checkpoint = await this.transcript.loadCheckpoint(sessionKey);
+        log.debug(`recall: checkpoint loaded, turns=${checkpoint?.turns?.length ?? 0}`);
+        if (checkpoint && checkpoint.turns.length > 0) {
+          const formatted = this.transcript.formatForRecall(checkpoint.turns, transcriptMaxTokens);
+          if (formatted) {
+            section = `## Working Context (Recovered)\n\n${formatted}`;
+            checkpointInjected = true;
+            // Clear checkpoint after injection
+            await this.transcript.clearCheckpoint();
+          }
+        }
+      }
+
+      if (!checkpointInjected) {
+        const entries = await this.transcript.readRecent(transcriptLookbackHours, sessionKey);
+        log.debug(`recall: read ${entries.length} transcript entries for sessionKey=${sessionKey}`);
+
+        // Apply max turns cap
+        const cappedEntries = entries.slice(-transcriptMaxTurns);
+        if (cappedEntries.length > 0) {
+          log.debug(`recall: injecting ${cappedEntries.length} transcript entries`);
+          const formatted = this.transcript.formatForRecall(cappedEntries, transcriptMaxTokens);
+          if (formatted) section = formatted;
+        }
+      }
+
+      timings.transcript = `${Date.now() - t0}ms`;
+      return section;
+    })();
+
+    const summariesPromise = (async (): Promise<string | null> => {
+      const t0 = Date.now();
+      if (!this.config.hourlySummariesEnabled || !sessionKey || !this.isRecallSectionEnabled("summaries", true)) {
+        timings.summaries = "skip";
+        return null;
+      }
+      const summariesLookbackHours = this.getRecallSectionNumber("summaries", "lookbackHours")
+        ?? this.config.summaryRecallHours;
+      const summariesMaxCount = this.getRecallSectionNumber("summaries", "maxCount")
+        ?? this.config.maxSummaryCount;
+      if (summariesLookbackHours <= 0 || summariesMaxCount <= 0) {
+        timings.summaries = "skip(limit=0)";
+        return null;
+      }
+
+      const summaries = await this.summarizer.readRecent(sessionKey, summariesLookbackHours);
+      const cappedSummaries = summaries.slice(0, summariesMaxCount);
+      const section =
+        cappedSummaries.length > 0
+          ? this.summarizer.formatForRecall(cappedSummaries, summariesMaxCount)
+          : null;
+      timings.summaries = `${Date.now() - t0}ms`;
+      return section;
+    })();
+
+    const conversationRecallPromise = (async (): Promise<string | null> => {
+      const t0 = Date.now();
+      if (
+        !this.config.conversationIndexEnabled ||
+        queryPolicy.skipConversationRecall ||
+        !this.isRecallSectionEnabled("conversation-recall", true)
+      ) {
+        timings.convRecall = "skip";
+        return null;
+      }
+
+      const topKOverride = this.getRecallSectionNumber("conversation-recall", "topK");
+      if (topKOverride === 0) {
+        timings.convRecall = "skip(topK=0)";
+        return null;
+      }
+
+      const startedAtMs = Date.now();
+      const timeoutMs = Math.max(
+        200,
+        this.getRecallSectionNumber("conversation-recall", "timeoutMs")
+          ?? this.config.conversationRecallTimeoutMs,
+      );
+      const topK = Math.max(
+        1,
+        topKOverride
+          ?? this.config.conversationRecallTopK,
+      );
+      const maxChars = Math.max(
+        400,
+        this.getRecallSectionNumber("conversation-recall", "maxChars")
+          ?? this.config.conversationRecallMaxChars,
+      );
+
+      const results = (await Promise.race([
+        this.searchConversationRecallResults(retrievalQuery, topK),
+        new Promise<[]>(resolve => setTimeout(() => resolve([]), timeoutMs)),
+      ]).catch(() => [])) as Array<{ path: string; snippet: string; score: number }>;
+
+      const durationMs = Date.now() - startedAtMs;
+      if (durationMs >= timeoutMs) {
+        log.debug(`conversation recall: timed out after ${timeoutMs}ms`);
+      }
+
+      const section = this.formatConversationRecallSection(results, maxChars);
+      timings.convRecall = `${Date.now() - t0}ms`;
+      return section;
+    })();
+
+    const compoundingPromise = (async (): Promise<string | null> => {
+      const t0 = Date.now();
+      if (!this.compounding || !this.config.compoundingInjectEnabled || !this.isRecallSectionEnabled("compounding", true)) {
+        timings.compounding = "skip";
+        return null;
+      }
+      const mistakes = await this.compounding.readMistakes();
+      if (!mistakes || !Array.isArray(mistakes.patterns) || mistakes.patterns.length === 0) {
+        timings.compounding = `${Date.now() - t0}ms`;
+        return null;
+      }
+      const maxPatterns = this.getRecallSectionNumber("compounding", "maxPatterns") ?? 40;
+      if (maxPatterns === 0) {
+        timings.compounding = "skip(limit=0)";
+        return null;
+      }
+      const lines: string[] = [
+        "## Institutional Learning (Compounded)",
+        "",
+        "Avoid repeating these patterns:",
+        ...mistakes.patterns.slice(0, maxPatterns).map((p) => `- ${p}`),
+      ];
+      timings.compounding = `${Date.now() - t0}ms`;
+      return lines.join("\n");
+    })();
+
     // --- Wait for all parallel work ---
-    const [sharedCtx, profile, identityContinuity, kiResult, artifacts, qmdResult] = await Promise.all([
+    const [
+      sharedCtx,
+      profile,
+      identityContinuity,
+      kiResult,
+      artifacts,
+      qmdResult,
+      transcriptSection,
+      summariesSection,
+      conversationRecallSection,
+      compoundingSection,
+    ] = await Promise.all([
       sharedContextPromise,
       profilePromise,
       identityContinuityPromise,
       knowledgeIndexPromise,
       artifactsPromise,
       qmdPromise,
+      transcriptPromise,
+      summariesPromise,
+      conversationRecallPromise,
+      compoundingPromise,
     ]);
 
     // --- Phase 2: Assemble sections in correct order ---
 
     // 0. Shared context
-    if (sharedCtx) sections.push(sharedCtx);
+    if (sharedCtx) this.appendRecallSection(sectionBuckets, "shared-context", sharedCtx);
 
     // 1. Profile
-    if (profile) sections.push(`## User Profile\n\n${profile}`);
+    if (profile) this.appendRecallSection(sectionBuckets, "profile", `## User Profile\n\n${profile}`);
 
     // 1a. Identity continuity
     if (identityContinuity) {
-      sections.push(identityContinuity.section);
+      this.appendRecallSection(sectionBuckets, "identity-continuity", identityContinuity.section);
       identityInjectionModeUsed = identityContinuity.mode;
       identityInjectedChars = identityContinuity.injectedChars;
       identityInjectionTruncated = identityContinuity.truncated;
@@ -2017,7 +2275,7 @@ export class Orchestrator {
 
     // 1b. Knowledge Index
     if (kiResult?.result) {
-      sections.push(kiResult.result);
+      this.appendRecallSection(sectionBuckets, "knowledge-index", kiResult.result);
       log.debug(`Knowledge Index: ${kiResult.result.split("\n").length - 4} entities, ${kiResult.result.length} chars${kiResult.cached ? " (cached)" : ""}`);
     }
 
@@ -2029,11 +2287,15 @@ export class Orchestrator {
         const created = createdRaw ? createdRaw.slice(0, 19).replace("T", " ") : "unknown-time";
         return `- [${artifactType}] "${this.truncateArtifactForRecall(a.content)}" (${created})`;
       });
-      sections.push(`## Verbatim Artifacts\n\n${lines.join("\n")}`);
+      this.appendRecallSection(sectionBuckets, "verbatim-artifacts", `## Verbatim Artifacts\n\n${lines.join("\n")}`);
     }
 
     // 1d. Memory Boxes (topic continuity windows, v8.0 Phase 2A)
-    if (this.config.memoryBoxesEnabled && this.config.boxRecallDays > 0) {
+    if (
+      this.isRecallSectionEnabled("memory-boxes", this.config.memoryBoxesEnabled === true) &&
+      this.config.memoryBoxesEnabled &&
+      this.config.boxRecallDays > 0
+    ) {
       const recentBoxes = await this.boxBuilderFor(profileStorage)
         .readRecentBoxes(this.config.boxRecallDays)
         .catch(() => []);
@@ -2043,16 +2305,21 @@ export class Orchestrator {
           const traceNote = b.traceId ? ` [trace: ${b.traceId.slice(0, 12)}]` : "";
           return `- [${sealedDate}${traceNote}] Topics: ${b.topics.join(", ")} (${b.memoryIds.length} memories)`;
         });
-        sections.push(`## Recent Topic Windows\n\n${boxLines.join("\n")}`);
+        this.appendRecallSection(sectionBuckets, "memory-boxes", `## Recent Topic Windows\n\n${boxLines.join("\n")}`);
       }
     }
 
     // 1e. TMT node (temporal memory tree, v8.2)
-    if (this.config.temporalMemoryTreeEnabled && recallMode !== "minimal" && (recallMode as RecallPlanMode) !== "no_recall") {
+    if (
+      this.isRecallSectionEnabled("temporal-memory-tree", this.config.temporalMemoryTreeEnabled === true) &&
+      this.config.temporalMemoryTreeEnabled &&
+      recallMode !== "minimal" &&
+      (recallMode as RecallPlanMode) !== "no_recall"
+    ) {
       const tmtNode = await this.tmtBuilder.getMostRelevantNode();
       if (tmtNode) {
         const levelLabel = tmtNode.level.charAt(0).toUpperCase() + tmtNode.level.slice(1);
-        sections.push(`## Memory Timeline (${levelLabel})\n\n${tmtNode.summary}`);
+        this.appendRecallSection(sectionBuckets, "temporal-memory-tree", `## Memory Timeline (${levelLabel})\n\n${tmtNode.summary}`);
       }
     }
 
@@ -2167,7 +2434,7 @@ export class Orchestrator {
         this.publishRecallResults({
           title: "Relevant Memories",
           results: memoryResults,
-          sections,
+          sectionBuckets,
           retrievalQuery,
           sessionKey,
           identityInjection: {
@@ -2195,7 +2462,7 @@ export class Orchestrator {
           this.publishRecallResults({
             title: "Relevant Memories",
             results: scoped,
-            sections,
+            sectionBuckets,
             retrievalQuery,
             sessionKey,
             identityInjection: {
@@ -2218,7 +2485,7 @@ export class Orchestrator {
             this.publishRecallResults({
               title: "Long-Term Memories (Fallback)",
               results: longTerm,
-              sections,
+              sectionBuckets,
               retrievalQuery,
               sessionKey,
               identityInjection: {
@@ -2233,7 +2500,7 @@ export class Orchestrator {
       }
 
       if (globalResults.length > 0) {
-        sections.push(
+        this.appendRecallSection(sectionBuckets, "workspace-context",
           this.formatQmdResults("Workspace Context", globalResults),
         );
       }
@@ -2244,7 +2511,7 @@ export class Orchestrator {
       // gently suggest an explicit workflow to inspect what was recalled and record feedback.
       // IMPORTANT: this is suggestion-only; never auto-mark negatives.
       if (isDisagreementPrompt(prompt)) {
-        sections.push(
+        this.appendRecallSection(sectionBuckets, "memories",
           [
             "## Retrieval Feedback Helper",
             "",
@@ -2276,7 +2543,7 @@ export class Orchestrator {
         this.publishRecallResults({
           title: "Relevant Memories",
           results: scoped,
-          sections,
+          sectionBuckets,
           retrievalQuery,
           sessionKey,
           identityInjection: {
@@ -2329,7 +2596,7 @@ export class Orchestrator {
             this.publishRecallResults({
               title: "Recent Memories",
               results: recent,
-              sections,
+              sectionBuckets,
               retrievalQuery,
               sessionKey,
               identityInjection: {
@@ -2352,7 +2619,7 @@ export class Orchestrator {
               this.publishRecallResults({
                 title: "Long-Term Memories (Fallback)",
                 results: longTerm,
-                sections,
+                sectionBuckets,
                 retrievalQuery,
                 sessionKey,
                 identityInjection: {
@@ -2377,7 +2644,7 @@ export class Orchestrator {
             this.publishRecallResults({
               title: "Long-Term Memories (Fallback)",
               results: longTerm,
-              sections,
+                sectionBuckets,
               retrievalQuery,
               sessionKey,
               identityInjection: {
@@ -2392,7 +2659,7 @@ export class Orchestrator {
       }
 
       if (isDisagreementPrompt(prompt)) {
-        sections.push(
+        this.appendRecallSection(sectionBuckets, "memories",
           [
             "## Retrieval Feedback Helper",
             "",
@@ -2408,132 +2675,41 @@ export class Orchestrator {
     }
 
     // 2.5. Compression guideline recall section (v8.11 Task 5)
-    const compressionGuidelineSection = await this.buildCompressionGuidelineRecallSection();
-    if (compressionGuidelineSection) {
-      sections.push(compressionGuidelineSection);
-    }
-
-    // 3. TRANSCRIPT INJECTION (NEW)
-    const transcriptT0 = Date.now();
-    log.debug(`recall: transcriptEnabled=${this.config.transcriptEnabled}, sessionKey=${sessionKey}`);
-    if (this.config.transcriptEnabled) {
-      // Try checkpoint first (post-compaction recovery)
-      let checkpointInjected = false;
-      if (this.config.checkpointEnabled) {
-        const checkpoint = await this.transcript.loadCheckpoint(sessionKey);
-        log.debug(`recall: checkpoint loaded, turns=${checkpoint?.turns?.length ?? 0}`);
-        if (checkpoint && checkpoint.turns.length > 0) {
-          const formatted = this.transcript.formatForRecall(
-            checkpoint.turns,
-            this.config.maxTranscriptTokens
-          );
-          if (formatted) {
-            sections.push(`## Working Context (Recovered)\n\n${formatted}`);
-            checkpointInjected = true;
-            // Clear checkpoint after injection
-            await this.transcript.clearCheckpoint();
-          }
-        }
-      }
-
-      // If no checkpoint, inject recent transcript
-      if (!checkpointInjected) {
-        const entries = await this.transcript.readRecent(
-          this.config.transcriptRecallHours,
-          sessionKey
-        );
-        log.debug(`recall: read ${entries.length} transcript entries for sessionKey=${sessionKey}`);
-
-        // Apply max turns cap
-        const cappedEntries = entries.slice(-this.config.maxTranscriptTurns);
-
-        if (cappedEntries.length > 0) {
-          log.debug(`recall: injecting ${cappedEntries.length} transcript entries`);
-          const formatted = this.transcript.formatForRecall(
-            cappedEntries,
-            this.config.maxTranscriptTokens
-          );
-          if (formatted) {
-            sections.push(formatted);
-          }
-        }
+    if (this.isRecallSectionEnabled("compression-guidelines", this.config.compressionGuidelineLearningEnabled === true)) {
+      const compressionGuidelineSection = await this.buildCompressionGuidelineRecallSection();
+      if (compressionGuidelineSection) {
+        this.appendRecallSection(sectionBuckets, "compression-guidelines", compressionGuidelineSection);
       }
     }
 
-    timings.transcript = `${Date.now() - transcriptT0}ms`;
-
-    // 4. HOURLY SUMMARIES INJECTION (NEW)
-    const summariesT0 = Date.now();
-    if (this.config.hourlySummariesEnabled && sessionKey) {
-      const summaries = await this.summarizer.readRecent(
-        sessionKey,
-        this.config.summaryRecallHours
-      );
-
-      // Apply max count cap
-      const cappedSummaries = summaries.slice(0, this.config.maxSummaryCount);
-
-      if (cappedSummaries.length > 0) {
-        const formatted = this.summarizer.formatForRecall(
-          cappedSummaries,
-          this.config.maxSummaryCount
-        );
-        sections.push(formatted);
-      }
+    // 3. Transcript/summaries/conversation/compounding are fetched in parallel above,
+    // then assembled here according to recallPipeline order.
+    if (transcriptSection) {
+      this.appendRecallSection(sectionBuckets, "transcript", transcriptSection);
     }
-
-    timings.summaries = `${Date.now() - summariesT0}ms`;
-
-    // 4.5. Conversation semantic recall hook (optional, default off).
-    // This searches over transcript chunk docs (ideally a separate QMD collection).
-    const convT0 = Date.now();
-    if (this.config.conversationIndexEnabled && !queryPolicy.skipConversationRecall) {
-      const startedAtMs = Date.now();
-      const timeoutMs = Math.max(200, this.config.conversationRecallTimeoutMs);
-      const topK = Math.max(1, this.config.conversationRecallTopK);
-      const maxChars = Math.max(400, this.config.conversationRecallMaxChars);
-
-      const results = (await Promise.race([
-        this.searchConversationRecallResults(retrievalQuery, topK),
-        new Promise<[]>(resolve => setTimeout(() => resolve([]), timeoutMs)),
-      ]).catch(() => [])) as Array<{ path: string; snippet: string; score: number }>;
-
-      const durationMs = Date.now() - startedAtMs;
-      if (durationMs >= timeoutMs) {
-        log.debug(`conversation recall: timed out after ${timeoutMs}ms`);
-      }
-
-      const formattedConversationRecall = this.formatConversationRecallSection(results, maxChars);
-      if (formattedConversationRecall) {
-        sections.push(formattedConversationRecall);
-      }
+    if (summariesSection) {
+      this.appendRecallSection(sectionBuckets, "summaries", summariesSection);
     }
-
-    timings.convRecall = `${Date.now() - convT0}ms`;
-
-    // 4.75. Compounding injection (v5.0, optional)
-    if (this.compounding && this.config.compoundingInjectEnabled) {
-      const mistakes = await this.compounding.readMistakes();
-      if (mistakes && Array.isArray(mistakes.patterns) && mistakes.patterns.length > 0) {
-        const lines: string[] = [
-          "## Institutional Learning (Compounded)",
-          "",
-          "Avoid repeating these patterns:",
-          ...mistakes.patterns.slice(0, 40).map((p) => `- ${p}`),
-        ];
-        sections.push(lines.join("\n"));
-      }
+    if (conversationRecallSection) {
+      this.appendRecallSection(sectionBuckets, "conversation-recall", conversationRecallSection);
+    }
+    if (compoundingSection) {
+      this.appendRecallSection(sectionBuckets, "compounding", compoundingSection);
     }
 
     // 5. Inject most relevant question (if enabled) (existing)
-    if (this.config.injectQuestions) {
+    if (this.config.injectQuestions && this.isRecallSectionEnabled("questions", true)) {
       const questions = await profileStorage.readQuestions({ unresolvedOnly: true });
       if (questions.length > 0) {
         // Find the most relevant question to the current prompt
         // Simple approach: use the highest-priority unresolved question
         // TODO: Could use QMD search to find the most contextually relevant one
         const topQuestion = questions[0]; // Already sorted by priority desc
-        sections.push(`## Open Question\n\nSomething I've been curious about: ${topQuestion.question}\n\n_Context: ${topQuestion.context}_`);
+        this.appendRecallSection(
+          sectionBuckets,
+          "questions",
+          `## Open Question\n\nSomething I've been curious about: ${topQuestion.question}\n\n_Context: ${topQuestion.context}_`,
+        );
       }
     }
 
@@ -2558,7 +2734,8 @@ export class Orchestrator {
         .catch((err) => log.debug(`last recall record failed: ${err}`));
     }
 
-    const context = sections.length === 0 ? "" : sections.join("\n\n---\n\n");
+    const orderedSections = this.assembleRecallSections(sectionBuckets);
+    const context = orderedSections.length === 0 ? "" : orderedSections.join("\n\n---\n\n");
     this.emitTrace({
       kind: "recall_summary",
       traceId: createHash("sha256")
@@ -4113,11 +4290,23 @@ export class Orchestrator {
     }
 
     // Auto-consolidate profile.md if it exceeds max lines
-    if (await this.storage.profileNeedsConsolidation()) {
+    const profileSection = this.getRecallSectionEntry("profile");
+    const profileConsolidationTriggerLines =
+      typeof profileSection?.consolidateTriggerLines === "number"
+        ? Math.max(0, Math.floor(profileSection.consolidateTriggerLines))
+        : undefined;
+    const profileConsolidationTargetLines =
+      typeof profileSection?.consolidateTargetLines === "number"
+        ? Math.max(0, Math.floor(profileSection.consolidateTargetLines))
+        : 50;
+    if (await this.storage.profileNeedsConsolidation(profileConsolidationTriggerLines)) {
       log.info("profile.md exceeds max lines — running smart consolidation");
       const currentProfile = await this.storage.readProfile();
       if (currentProfile) {
-        const profileResult = await this.extraction.consolidateProfile(currentProfile);
+        const profileResult = await this.extraction.consolidateProfile(
+          currentProfile,
+          profileConsolidationTargetLines,
+        );
         if (profileResult) {
           await this.storage.writeProfile(profileResult.consolidatedProfile);
           log.info(`profile.md consolidated: removed ${profileResult.removedCount} items — ${profileResult.summary}`);
@@ -4847,7 +5036,7 @@ export class Orchestrator {
   private publishRecallResults(options: {
     title: string;
     results: QmdSearchResult[];
-    sections: string[];
+    sectionBuckets: Map<string, string[]>;
     retrievalQuery: string;
     sessionKey: string | undefined;
     identityInjection?: {
@@ -4872,7 +5061,11 @@ export class Orchestrator {
         .catch((err) => log.debug(`last recall record failed: ${err}`));
     }
 
-    options.sections.push(this.formatQmdResults(options.title, options.results));
+    this.appendRecallSection(
+      options.sectionBuckets,
+      "memories",
+      this.formatQmdResults(options.title, options.results),
+    );
   }
 
   private async searchEmbeddingFallback(query: string, limit: number): Promise<QmdSearchResult[]> {

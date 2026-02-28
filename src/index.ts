@@ -150,8 +150,9 @@ export default {
           log.debug(`before_agent_start: recall returned ${context?.length ?? 0} chars`);
           if (!context) return;
 
-          // Rough token estimate: 1 token ≈ 4 chars
-          const maxChars = cfg.maxMemoryTokens * 4;
+          // Final safety cap; recall assembly also enforces this budget.
+          const maxChars = cfg.recallBudgetChars;
+          if (maxChars === 0) return;
           const trimmed =
             context.length > maxChars
               ? context.slice(0, maxChars) + "\n\n...(memory context trimmed)"
