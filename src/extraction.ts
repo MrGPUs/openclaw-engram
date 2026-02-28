@@ -8,7 +8,6 @@ import {
   ConsolidationResultSchema,
   IdentityConsolidationResultSchema,
   buildProfileConsolidationResultSchema,
-  ProfileConsolidationResultSchema,
   ProactiveQuestionsResultSchema,
   ContradictionVerificationSchema,
   SuggestedLinksSchema,
@@ -1027,7 +1026,7 @@ Respond with valid JSON matching this schema:
       pTraceId,
       "profile_consolidation",
       pStartTime,
-      ProfileConsolidationResultSchema,
+      buildProfileConsolidationResultSchema(targetLines),
       [
         {
           role: "system",
@@ -1076,7 +1075,7 @@ The output should be the COMPLETE consolidated profile as valid markdown, starti
 3. REMOVES stale information that has been superseded by newer bullets
 4. REMOVES trivial or overly specific operational details that won't be useful across sessions
 5. KEEPS the most important, durable observations about the user's preferences, habits, identity, and working style
-6. Target roughly 400 lines — this is a soft target, prioritize quality over length
+6. Target roughly ${targetLines} lines — this is a soft target, prioritize quality over length
 7. Write in the same style as the existing profile — concise bullets, no fluff
 
 The output should be the COMPLETE consolidated profile as valid markdown, starting with "# Behavioral Profile".`,

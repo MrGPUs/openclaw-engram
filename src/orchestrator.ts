@@ -2081,14 +2081,180 @@ export class Orchestrator {
       return { memoryResultsLists: [filteredResults], globalResults: [] };
     })();
 
+    const transcriptPromise = (async (): Promise<string | null> => {
+      const t0 = Date.now();
+      if (!this.config.transcriptEnabled || !this.isRecallSectionEnabled("transcript", true)) {
+        timings.transcript = "skip";
+        return null;
+      }
+      const transcriptMaxTokens = this.getRecallSectionNumber("transcript", "maxTokens")
+        ?? this.config.maxTranscriptTokens;
+      const transcriptMaxTurns = this.getRecallSectionNumber("transcript", "maxTurns")
+        ?? this.config.maxTranscriptTurns;
+      const transcriptLookbackHours = this.getRecallSectionNumber("transcript", "lookbackHours")
+        ?? this.config.transcriptRecallHours;
+      if (transcriptMaxTokens === 0 || transcriptMaxTurns === 0 || transcriptLookbackHours === 0) {
+        timings.transcript = "skip(limit=0)";
+        return null;
+      }
+
+      let section: string | null = null;
+      // Try checkpoint first (post-compaction recovery)
+      let checkpointInjected = false;
+      if (this.config.checkpointEnabled) {
+        const checkpoint = await this.transcript.loadCheckpoint(sessionKey);
+        log.debug(`recall: checkpoint loaded, turns=${checkpoint?.turns?.length ?? 0}`);
+        if (checkpoint && checkpoint.turns.length > 0) {
+          const formatted = this.transcript.formatForRecall(checkpoint.turns, transcriptMaxTokens);
+          if (formatted) {
+            section = `## Working Context (Recovered)\n\n${formatted}`;
+            checkpointInjected = true;
+            // Clear checkpoint after injection
+            await this.transcript.clearCheckpoint();
+          }
+        }
+      }
+
+      if (!checkpointInjected) {
+        const entries = await this.transcript.readRecent(transcriptLookbackHours, sessionKey);
+        log.debug(`recall: read ${entries.length} transcript entries for sessionKey=${sessionKey}`);
+
+        // Apply max turns cap
+        const cappedEntries = entries.slice(-transcriptMaxTurns);
+        if (cappedEntries.length > 0) {
+          log.debug(`recall: injecting ${cappedEntries.length} transcript entries`);
+          const formatted = this.transcript.formatForRecall(cappedEntries, transcriptMaxTokens);
+          if (formatted) section = formatted;
+        }
+      }
+
+      timings.transcript = `${Date.now() - t0}ms`;
+      return section;
+    })();
+
+    const summariesPromise = (async (): Promise<string | null> => {
+      const t0 = Date.now();
+      if (!this.config.hourlySummariesEnabled || !sessionKey || !this.isRecallSectionEnabled("summaries", true)) {
+        timings.summaries = "skip";
+        return null;
+      }
+      const summariesLookbackHours = this.getRecallSectionNumber("summaries", "lookbackHours")
+        ?? this.config.summaryRecallHours;
+      const summariesMaxCount = this.getRecallSectionNumber("summaries", "maxCount")
+        ?? this.config.maxSummaryCount;
+      if (summariesLookbackHours <= 0 || summariesMaxCount <= 0) {
+        timings.summaries = "skip(limit=0)";
+        return null;
+      }
+
+      const summaries = await this.summarizer.readRecent(sessionKey, summariesLookbackHours);
+      const cappedSummaries = summaries.slice(0, summariesMaxCount);
+      const section =
+        cappedSummaries.length > 0
+          ? this.summarizer.formatForRecall(cappedSummaries, summariesMaxCount)
+          : null;
+      timings.summaries = `${Date.now() - t0}ms`;
+      return section;
+    })();
+
+    const conversationRecallPromise = (async (): Promise<string | null> => {
+      const t0 = Date.now();
+      if (
+        !this.config.conversationIndexEnabled ||
+        queryPolicy.skipConversationRecall ||
+        !this.isRecallSectionEnabled("conversation-recall", true)
+      ) {
+        timings.convRecall = "skip";
+        return null;
+      }
+
+      const topKOverride = this.getRecallSectionNumber("conversation-recall", "topK");
+      if (topKOverride === 0) {
+        timings.convRecall = "skip(topK=0)";
+        return null;
+      }
+
+      const startedAtMs = Date.now();
+      const timeoutMs = Math.max(
+        200,
+        this.getRecallSectionNumber("conversation-recall", "timeoutMs")
+          ?? this.config.conversationRecallTimeoutMs,
+      );
+      const topK = Math.max(
+        1,
+        topKOverride
+          ?? this.config.conversationRecallTopK,
+      );
+      const maxChars = Math.max(
+        400,
+        this.getRecallSectionNumber("conversation-recall", "maxChars")
+          ?? this.config.conversationRecallMaxChars,
+      );
+
+      const results = (await Promise.race([
+        this.searchConversationRecallResults(retrievalQuery, topK),
+        new Promise<[]>(resolve => setTimeout(() => resolve([]), timeoutMs)),
+      ]).catch(() => [])) as Array<{ path: string; snippet: string; score: number }>;
+
+      const durationMs = Date.now() - startedAtMs;
+      if (durationMs >= timeoutMs) {
+        log.debug(`conversation recall: timed out after ${timeoutMs}ms`);
+      }
+
+      const section = this.formatConversationRecallSection(results, maxChars);
+      timings.convRecall = `${Date.now() - t0}ms`;
+      return section;
+    })();
+
+    const compoundingPromise = (async (): Promise<string | null> => {
+      const t0 = Date.now();
+      if (!this.compounding || !this.config.compoundingInjectEnabled || !this.isRecallSectionEnabled("compounding", true)) {
+        timings.compounding = "skip";
+        return null;
+      }
+      const mistakes = await this.compounding.readMistakes();
+      if (!mistakes || !Array.isArray(mistakes.patterns) || mistakes.patterns.length === 0) {
+        timings.compounding = `${Date.now() - t0}ms`;
+        return null;
+      }
+      const maxPatterns = this.getRecallSectionNumber("compounding", "maxPatterns") ?? 40;
+      if (maxPatterns === 0) {
+        timings.compounding = "skip(limit=0)";
+        return null;
+      }
+      const lines: string[] = [
+        "## Institutional Learning (Compounded)",
+        "",
+        "Avoid repeating these patterns:",
+        ...mistakes.patterns.slice(0, maxPatterns).map((p) => `- ${p}`),
+      ];
+      timings.compounding = `${Date.now() - t0}ms`;
+      return lines.join("\n");
+    })();
+
     // --- Wait for all parallel work ---
-    const [sharedCtx, profile, identityContinuity, kiResult, artifacts, qmdResult] = await Promise.all([
+    const [
+      sharedCtx,
+      profile,
+      identityContinuity,
+      kiResult,
+      artifacts,
+      qmdResult,
+      transcriptSection,
+      summariesSection,
+      conversationRecallSection,
+      compoundingSection,
+    ] = await Promise.all([
       sharedContextPromise,
       profilePromise,
       identityContinuityPromise,
       knowledgeIndexPromise,
       artifactsPromise,
       qmdPromise,
+      transcriptPromise,
+      summariesPromise,
+      conversationRecallPromise,
+      compoundingPromise,
     ]);
 
     // --- Phase 2: Assemble sections in correct order ---
@@ -2516,162 +2682,19 @@ export class Orchestrator {
       }
     }
 
-    // 3. TRANSCRIPT INJECTION (NEW)
-    const transcriptT0 = Date.now();
-    log.debug(`recall: transcriptEnabled=${this.config.transcriptEnabled}, sessionKey=${sessionKey}`);
-    if (this.config.transcriptEnabled && this.isRecallSectionEnabled("transcript", true)) {
-      const transcriptMaxTokens = this.getRecallSectionNumber("transcript", "maxTokens")
-        ?? this.config.maxTranscriptTokens;
-      const transcriptMaxTurns = this.getRecallSectionNumber("transcript", "maxTurns")
-        ?? this.config.maxTranscriptTurns;
-      const transcriptLookbackHours = this.getRecallSectionNumber("transcript", "lookbackHours")
-        ?? this.config.transcriptRecallHours;
-      if (transcriptMaxTokens === 0 || transcriptMaxTurns === 0 || transcriptLookbackHours === 0) {
-        timings.transcript = "skip(limit=0)";
-      } else {
-      // Try checkpoint first (post-compaction recovery)
-        let checkpointInjected = false;
-        if (this.config.checkpointEnabled) {
-          const checkpoint = await this.transcript.loadCheckpoint(sessionKey);
-          log.debug(`recall: checkpoint loaded, turns=${checkpoint?.turns?.length ?? 0}`);
-          if (checkpoint && checkpoint.turns.length > 0) {
-            const formatted = this.transcript.formatForRecall(
-              checkpoint.turns,
-              transcriptMaxTokens
-            );
-            if (formatted) {
-              this.appendRecallSection(sectionBuckets, "transcript", `## Working Context (Recovered)\n\n${formatted}`);
-              checkpointInjected = true;
-              // Clear checkpoint after injection
-              await this.transcript.clearCheckpoint();
-            }
-          }
-        }
-
-        // If no checkpoint, inject recent transcript
-        if (!checkpointInjected) {
-          const entries = await this.transcript.readRecent(
-            transcriptLookbackHours,
-            sessionKey
-          );
-          log.debug(`recall: read ${entries.length} transcript entries for sessionKey=${sessionKey}`);
-
-          // Apply max turns cap
-          const cappedEntries = entries.slice(-transcriptMaxTurns);
-
-          if (cappedEntries.length > 0) {
-            log.debug(`recall: injecting ${cappedEntries.length} transcript entries`);
-            const formatted = this.transcript.formatForRecall(
-              cappedEntries,
-              transcriptMaxTokens
-            );
-            if (formatted) {
-              this.appendRecallSection(sectionBuckets, "transcript", formatted);
-            }
-          }
-        }
-      }
+    // 3. Transcript/summaries/conversation/compounding are fetched in parallel above,
+    // then assembled here according to recallPipeline order.
+    if (transcriptSection) {
+      this.appendRecallSection(sectionBuckets, "transcript", transcriptSection);
     }
-
-    timings.transcript = `${Date.now() - transcriptT0}ms`;
-
-    // 4. HOURLY SUMMARIES INJECTION (NEW)
-    const summariesT0 = Date.now();
-    if (this.config.hourlySummariesEnabled && sessionKey && this.isRecallSectionEnabled("summaries", true)) {
-      const summariesLookbackHours = this.getRecallSectionNumber("summaries", "lookbackHours")
-        ?? this.config.summaryRecallHours;
-      const summariesMaxCount = this.getRecallSectionNumber("summaries", "maxCount")
-        ?? this.config.maxSummaryCount;
-      if (summariesLookbackHours > 0 && summariesMaxCount > 0) {
-        const summaries = await this.summarizer.readRecent(
-          sessionKey,
-          summariesLookbackHours
-        );
-
-        // Apply max count cap
-        const cappedSummaries = summaries.slice(0, summariesMaxCount);
-
-        if (cappedSummaries.length > 0) {
-          const formatted = this.summarizer.formatForRecall(
-            cappedSummaries,
-            summariesMaxCount
-          );
-          this.appendRecallSection(sectionBuckets, "summaries", formatted);
-        }
-      }
+    if (summariesSection) {
+      this.appendRecallSection(sectionBuckets, "summaries", summariesSection);
     }
-
-    timings.summaries = `${Date.now() - summariesT0}ms`;
-
-    // 4.5. Conversation semantic recall hook (optional, default off).
-    // This searches over transcript chunk docs (ideally a separate QMD collection).
-    const convT0 = Date.now();
-    if (
-      this.config.conversationIndexEnabled &&
-      !queryPolicy.skipConversationRecall &&
-      this.isRecallSectionEnabled("conversation-recall", true)
-    ) {
-      const topKOverride = this.getRecallSectionNumber("conversation-recall", "topK");
-      if (topKOverride === 0) {
-        timings.convRecall = "skip(topK=0)";
-      } else {
-      const startedAtMs = Date.now();
-      const timeoutMs = Math.max(
-        200,
-        this.getRecallSectionNumber("conversation-recall", "timeoutMs")
-          ?? this.config.conversationRecallTimeoutMs,
-      );
-      const topK = Math.max(
-        1,
-        topKOverride
-          ?? this.config.conversationRecallTopK,
-      );
-      const maxChars = Math.max(
-        400,
-        this.getRecallSectionNumber("conversation-recall", "maxChars")
-          ?? this.config.conversationRecallMaxChars,
-      );
-
-      const results = (await Promise.race([
-        this.searchConversationRecallResults(retrievalQuery, topK),
-        new Promise<[]>(resolve => setTimeout(() => resolve([]), timeoutMs)),
-      ]).catch(() => [])) as Array<{ path: string; snippet: string; score: number }>;
-
-      const durationMs = Date.now() - startedAtMs;
-      if (durationMs >= timeoutMs) {
-        log.debug(`conversation recall: timed out after ${timeoutMs}ms`);
-      }
-
-      const formattedConversationRecall = this.formatConversationRecallSection(results, maxChars);
-      if (formattedConversationRecall) {
-        this.appendRecallSection(sectionBuckets, "conversation-recall", formattedConversationRecall);
-      }
-      }
+    if (conversationRecallSection) {
+      this.appendRecallSection(sectionBuckets, "conversation-recall", conversationRecallSection);
     }
-
-    timings.convRecall = `${Date.now() - convT0}ms`;
-
-    // 4.75. Compounding injection (v5.0, optional)
-    if (
-      this.compounding &&
-      this.config.compoundingInjectEnabled &&
-      this.isRecallSectionEnabled("compounding", true)
-    ) {
-      const mistakes = await this.compounding.readMistakes();
-      if (mistakes && Array.isArray(mistakes.patterns) && mistakes.patterns.length > 0) {
-        const maxPatterns = this.getRecallSectionNumber("compounding", "maxPatterns") ?? 40;
-        if (maxPatterns === 0) {
-          // Explicit hard-disable for this section via pipeline override.
-        } else {
-        const lines: string[] = [
-          "## Institutional Learning (Compounded)",
-          "",
-          "Avoid repeating these patterns:",
-          ...mistakes.patterns.slice(0, maxPatterns).map((p) => `- ${p}`),
-        ];
-        this.appendRecallSection(sectionBuckets, "compounding", lines.join("\n"));
-        }
-      }
+    if (compoundingSection) {
+      this.appendRecallSection(sectionBuckets, "compounding", compoundingSection);
     }
 
     // 5. Inject most relevant question (if enabled) (existing)
