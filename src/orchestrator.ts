@@ -80,7 +80,12 @@ import {
   resolvePrincipal,
 } from "./namespaces/principal.js";
 import { SharedContextManager } from "./shared-context/manager.js";
-import { CompoundingEngine } from "./compounding/engine.js";
+import {
+  CompoundingEngine,
+  defaultTierMigrationCycleBudget,
+} from "./compounding/engine.js";
+import { TierMigrationExecutor } from "./tier-migration.js";
+import { decideTierTransition, type MemoryTier } from "./tier-routing.js";
 import { selectRouteRule, type RouteRule, type RoutingEngineOptions } from "./routing/engine.js";
 import { RoutingRulesStore } from "./routing/store.js";
 import type {
@@ -583,6 +588,8 @@ export class Orchestrator {
   private qmdMaintenancePending = false;
   private qmdMaintenanceInFlight = false;
   private lastQmdEmbedAtMs = 0;
+  private tierMigrationInFlight = false;
+  private lastTierMigrationRunAtMs = 0;
   private readonly conversationIndexLastUpdateAtMs = new Map<string, number>();
   private lastFileHygieneRunAtMs = 0;
   private lastRecallFailureLogAtMs = 0;
@@ -2851,6 +2858,85 @@ export class Orchestrator {
     await storage.saveMeta(meta);
 
     this.requestQmdMaintenance();
+    await this.runTierMigrationCycle(storage, "extraction");
+  }
+
+  private async runTierMigrationCycle(
+    storage: StorageManager,
+    trigger: "extraction" | "maintenance",
+  ): Promise<void> {
+    if (!this.config.qmdTierMigrationEnabled) return;
+    if (trigger === "maintenance" && !this.config.qmdTierAutoBackfillEnabled) return;
+    if (this.tierMigrationInFlight) return;
+
+    const budget = this.compounding?.tierMigrationCycleBudget(trigger)
+      ?? defaultTierMigrationCycleBudget(this.config, trigger);
+    const nowMs = Date.now();
+    if (nowMs - this.lastTierMigrationRunAtMs < budget.minIntervalMs) return;
+
+    const policy = {
+      enabled: this.config.qmdTierMigrationEnabled,
+      demotionMinAgeDays: this.config.qmdTierDemotionMinAgeDays,
+      demotionValueThreshold: this.config.qmdTierDemotionValueThreshold,
+      promotionValueThreshold: this.config.qmdTierPromotionValueThreshold,
+    };
+
+    this.tierMigrationInFlight = true;
+    try {
+      const coldStorage = new StorageManager(path.join(storage.dir, "cold"));
+      const [hotMemories, coldMemories] = await Promise.all([
+        storage.readAllMemories(),
+        coldStorage.readAllMemories(),
+      ]);
+      const now = new Date();
+      const scanLimit = Math.max(0, Math.floor(budget.scanLimit));
+      const hotScanLimit = Math.min(hotMemories.length, Math.ceil(scanLimit * 0.75));
+      const coldScanLimit = Math.min(coldMemories.length, Math.max(0, scanLimit - hotScanLimit));
+      const toTimestamp = (memory: MemoryFile): number =>
+        Date.parse(memory.frontmatter.updated ?? memory.frontmatter.created);
+      const hotCandidates = hotMemories
+        .map((memory) => ({ memory, tier: "hot" as MemoryTier }))
+        .sort((a, b) => toTimestamp(a.memory) - toTimestamp(b.memory))
+        .slice(0, hotScanLimit);
+      const coldCandidates = coldMemories
+        .map((memory) => ({ memory, tier: "cold" as MemoryTier }))
+        .sort((a, b) => toTimestamp(b.memory) - toTimestamp(a.memory))
+        .slice(0, coldScanLimit);
+      const candidates = [...hotCandidates, ...coldCandidates];
+
+      const migration = new TierMigrationExecutor({
+        storage,
+        qmd: this.qmd,
+        hotCollection: this.config.qmdCollection,
+        coldCollection: this.config.qmdColdCollection ?? `${this.config.qmdCollection}-cold`,
+        autoEmbed: this.config.qmdAutoEmbedEnabled,
+      });
+
+      let migrated = 0;
+      for (const candidate of candidates) {
+        if (migrated >= budget.limit) break;
+        const decision = decideTierTransition(candidate.memory, candidate.tier, policy, now);
+        if (!decision.changed) continue;
+
+        const res = await migration.migrateMemory({
+          memory: candidate.memory,
+          fromTier: candidate.tier,
+          toTier: decision.nextTier,
+          reason: `${trigger}:${decision.reason}`,
+        });
+        if (res.changed) migrated += 1;
+      }
+
+      this.lastTierMigrationRunAtMs = Date.now();
+      log.debug(
+        `tier migration cycle completed: trigger=${trigger} scanned=${candidates.length} migrated=${migrated} limit=${budget.limit}`,
+      );
+    } catch (err) {
+      this.lastTierMigrationRunAtMs = Date.now();
+      log.warn(`tier migration cycle failed (${trigger}, fail-open): ${err}`);
+    } finally {
+      this.tierMigrationInFlight = false;
+    }
   }
 
   private maybeScheduleConsolidation(nonZeroExtraction: boolean): void {
@@ -3581,7 +3667,7 @@ export class Orchestrator {
       await this.flushAccessTracking();
     }
 
-    const allMemories = await this.storage.readAllMemories();
+    let allMemories = await this.storage.readAllMemories();
     if (allMemories.length < 5) {
       return { memoriesProcessed: allMemories.length, merged, invalidated };
     }
@@ -3763,6 +3849,9 @@ export class Orchestrator {
 
     // v8.3 Compression guideline learning pass (default off, fail-open).
     await this.runCompressionGuidelineLearningPass();
+
+    await this.runTierMigrationCycle(this.storage, "maintenance");
+    allMemories = await this.storage.readAllMemories();
 
     // Fact archival pass (v6.0) — move old, low-importance, rarely-accessed facts to archive/
     if (this.config.factArchivalEnabled) {

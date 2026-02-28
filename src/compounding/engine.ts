@@ -11,6 +11,33 @@ type MistakesFile = {
   patterns: string[];
 };
 
+export type TierMigrationCycleTrigger = "extraction" | "maintenance";
+export interface TierMigrationCycleBudget {
+  limit: number;
+  scanLimit: number;
+  minIntervalMs: number;
+}
+
+export function defaultTierMigrationCycleBudget(
+  config: Pick<PluginConfig, "qmdTierAutoBackfillEnabled">,
+  trigger: TierMigrationCycleTrigger,
+): TierMigrationCycleBudget {
+  if (trigger === "extraction") {
+    const limit = 12;
+    return {
+      limit,
+      scanLimit: limit * 4,
+      minIntervalMs: 60_000,
+    };
+  }
+  const limit = config.qmdTierAutoBackfillEnabled ? 200 : 50;
+  return {
+    limit,
+    scanLimit: limit * 4,
+    minIntervalMs: config.qmdTierAutoBackfillEnabled ? 120_000 : 300_000,
+  };
+}
+
 function isoWeekId(d: Date): string {
   // ISO week based on Thursday
   const dt = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
@@ -210,6 +237,10 @@ export class CompoundingEngine {
     } catch {
       return null;
     }
+  }
+
+  tierMigrationCycleBudget(trigger: TierMigrationCycleTrigger): TierMigrationCycleBudget {
+    return defaultTierMigrationCycleBudget(this.config, trigger);
   }
 
   private async readFeedbackEntriesForWeek(weekId: string): Promise<SharedFeedbackEntry[]> {
