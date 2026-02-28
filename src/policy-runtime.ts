@@ -138,7 +138,13 @@ export class PolicyRuntimeManager {
 
     for (const adjustment of state.adjustments) {
       if (!isRuntimeParameter(adjustment.parameter)) {
-        const rolledBack = existing ? (await writeSnapshotAtomic(this.runtimePath, existing), true) : await this.rollback();
+        let rolledBack = false;
+        if (existing) {
+          await writeSnapshotAtomic(this.runtimePath, existing);
+          rolledBack = true;
+        } else {
+          rolledBack = await this.rollback();
+        }
         return {
           applied: false,
           rolledBack,
@@ -150,7 +156,13 @@ export class PolicyRuntimeManager {
         continue;
       }
       if (!Number.isFinite(adjustment.nextValue)) {
-        const rolledBack = existing ? (await writeSnapshotAtomic(this.runtimePath, existing), true) : await this.rollback();
+        let rolledBack = false;
+        if (existing) {
+          await writeSnapshotAtomic(this.runtimePath, existing);
+          rolledBack = true;
+        } else {
+          rolledBack = await this.rollback();
+        }
         return {
           applied: false,
           rolledBack,
