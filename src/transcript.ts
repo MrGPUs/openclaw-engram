@@ -2,6 +2,7 @@ import { appendFile, mkdir, readdir, readFile, stat, unlink, writeFile } from "n
 import path from "node:path";
 import { log } from "./logger.js";
 import type { TranscriptEntry, Checkpoint, PluginConfig } from "./types.js";
+import { analyzeSessionIntegrity, type SessionIntegrityReport } from "./session-integrity.js";
 
 /**
  * Manages conversation transcript storage, checkpointing, and recall formatting.
@@ -829,5 +830,38 @@ export class TranscriptManager {
         channelTypes: {},
       };
     }
+  }
+
+  async analyzeIntegrity(): Promise<SessionIntegrityReport> {
+    return analyzeSessionIntegrity({ memoryDir: this.config.memoryDir });
+  }
+
+  async getRecoverySummary(sessionKey?: string): Promise<{
+    generatedAt: string;
+    sessionKey?: string;
+    healthy: boolean;
+    issueCount: number;
+    incompleteTurns: number;
+    brokenChains: number;
+    checkpointHealthy: boolean;
+  }> {
+    const report = await this.analyzeIntegrity();
+    const selectedSessions = sessionKey
+      ? report.sessions.filter((session) => session.sessionKey === sessionKey)
+      : report.sessions;
+    const incompleteTurns = selectedSessions.reduce((sum, session) => sum + session.incompleteTurns, 0);
+    const brokenChains = selectedSessions.reduce((sum, session) => sum + session.brokenChains, 0);
+    const filteredIssues = report.issues.filter((issue) => !sessionKey || issue.sessionKey === sessionKey);
+    const issueCount = filteredIssues.length;
+    const severeIssueCount = filteredIssues.filter((issue) => issue.severity !== "info").length;
+    return {
+      generatedAt: report.generatedAt,
+      sessionKey,
+      healthy: sessionKey ? severeIssueCount === 0 && report.checkpoint.healthy : report.healthy,
+      issueCount,
+      incompleteTurns,
+      brokenChains,
+      checkpointHealthy: report.checkpoint.healthy,
+    };
   }
 }
