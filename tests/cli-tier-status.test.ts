@@ -122,6 +122,9 @@ test("orchestrator runTierMigrationNow dry-run reports candidates without moving
     const status = await runTierStatusCliCommand(orchestrator);
     assert.equal(status.lastCycle?.dryRun, true);
     assert.equal(status.lastCycle?.migrated, 1);
+    assert.equal(status.totals.migrated, 0);
+    assert.equal(status.totals.promoted, 0);
+    assert.equal(status.totals.demoted, 0);
     assert.equal(status.totals.cycles >= 1, true);
   } finally {
     await rm(memoryDir, { recursive: true, force: true });

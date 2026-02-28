@@ -238,15 +238,18 @@ export class TierMigrationStatusStore {
 
   async recordCycle(summary: TierMigrationCycleSummary): Promise<void> {
     const now = new Date().toISOString();
+    const migratedDelta = summary.dryRun ? 0 : Math.max(0, summary.migrated);
+    const promotedDelta = summary.dryRun ? 0 : Math.max(0, summary.promoted);
+    const demotedDelta = summary.dryRun ? 0 : Math.max(0, summary.demoted);
     const next: TierMigrationStatusSnapshot = {
       updatedAt: now,
       lastCycle: { ...summary },
       totals: {
         cycles: this.state.totals.cycles + 1,
         scanned: this.state.totals.scanned + Math.max(0, summary.scanned),
-        migrated: this.state.totals.migrated + Math.max(0, summary.migrated),
-        promoted: this.state.totals.promoted + Math.max(0, summary.promoted),
-        demoted: this.state.totals.demoted + Math.max(0, summary.demoted),
+        migrated: this.state.totals.migrated + migratedDelta,
+        promoted: this.state.totals.promoted + promotedDelta,
+        demoted: this.state.totals.demoted + demotedDelta,
         errors: this.state.totals.errors + Math.max(0, summary.errorCount ?? 0),
       },
     };
