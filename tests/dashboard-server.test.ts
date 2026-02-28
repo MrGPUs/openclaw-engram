@@ -82,7 +82,7 @@ test("dashboard server serves health, graph, static assets, and websocket upgrad
       `Host: ${started.host}:${started.port}`,
       "Upgrade: websocket",
       "Connection: Upgrade",
-      "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==",
+      "Sec-WebSocket-Key: AAAAAAAAAAAAAAAAAAAAAA==",
       "Sec-WebSocket-Version: 13",
       "",
       "",
@@ -94,4 +94,3 @@ test("dashboard server serves health, graph, static assets, and websocket upgrad
 
   await server.stop();
 });
-
