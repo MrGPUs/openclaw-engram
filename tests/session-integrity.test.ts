@@ -199,3 +199,28 @@ test("analyzeSessionIntegrity detects duplicate IDs and role-chain breaks across
   assert.equal(codes.has("transcript_broken_chain"), true);
   assert.equal(codes.has("transcript_duplicate_turn_id"), true);
 });
+
+test("session repair reports remove_checkpoint failures except ENOENT", async () => {
+  const memoryDir = await buildMemoryDir("engram-session-repair-remove-checkpoint-");
+  const badTarget = path.join(memoryDir, "state");
+
+  const result = await applySessionRepair({
+    plan: {
+      generatedAt: new Date().toISOString(),
+      dryRun: false,
+      allowSessionFileRepair: false,
+      actions: [
+        {
+          kind: "remove_checkpoint",
+          targetPath: badTarget,
+          description: "remove invalid checkpoint",
+        },
+      ],
+    },
+  });
+
+  assert.equal(result.applied, true);
+  assert.equal(result.actionsAttempted, 1);
+  assert.equal(result.actionsApplied, 0);
+  assert.equal(result.errors.length, 1);
+});

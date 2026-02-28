@@ -1,4 +1,5 @@
 import type { GraphEdge } from "./graph.js";
+import { graphEdgeKey } from "./graph-dashboard-key.js";
 import type { GraphSnapshot } from "./graph-dashboard-parser.js";
 
 export interface GraphPatch {
@@ -8,15 +9,11 @@ export interface GraphPatch {
   removedEdges: GraphEdge[];
 }
 
-function edgeKey(edge: GraphEdge): string {
-  return `${edge.type}|${edge.from}|${edge.to}|${edge.label}|${edge.ts}`;
-}
-
 export function diffGraphSnapshots(previous: GraphSnapshot, next: GraphSnapshot): GraphPatch {
   const prevNodeSet = new Set(previous.nodes.map((node) => node.id));
   const nextNodeSet = new Set(next.nodes.map((node) => node.id));
-  const prevEdges = new Map(previous.edges.map((edge) => [edgeKey(edge), edge]));
-  const nextEdges = new Map(next.edges.map((edge) => [edgeKey(edge), edge]));
+  const prevEdges = new Map(previous.edges.map((edge) => [graphEdgeKey(edge), edge]));
+  const nextEdges = new Map(next.edges.map((edge) => [graphEdgeKey(edge), edge]));
 
   const addedNodes = [...nextNodeSet].filter((id) => !prevNodeSet.has(id)).sort((a, b) => a.localeCompare(b));
   const removedNodes = [...prevNodeSet].filter((id) => !nextNodeSet.has(id)).sort((a, b) => a.localeCompare(b));
@@ -36,4 +33,3 @@ export function diffGraphSnapshots(previous: GraphSnapshot, next: GraphSnapshot)
     removedEdges,
   };
 }
-

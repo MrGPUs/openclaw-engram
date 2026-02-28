@@ -1,6 +1,7 @@
 import path from "node:path";
 import { readFile } from "node:fs/promises";
 import type { GraphEdge, GraphType } from "./graph.js";
+import { graphEdgeKey } from "./graph-dashboard-key.js";
 
 export interface GraphSnapshotNode {
   id: string;
@@ -24,10 +25,6 @@ const GRAPH_TYPES: GraphType[] = ["entity", "time", "causal"];
 
 function graphFile(memoryDir: string, type: GraphType): string {
   return path.join(memoryDir, "state", "graphs", `${type}.jsonl`);
-}
-
-function graphEdgeKey(edge: GraphEdge): string {
-  return `${edge.type}|${edge.from}|${edge.to}|${edge.label}|${edge.ts}`;
 }
 
 function isGraphEdge(raw: unknown, expectedType: GraphType): raw is GraphEdge {
@@ -105,4 +102,3 @@ export async function graphSnapshotFromMemoryDir(memoryDir: string): Promise<Gra
     },
   };
 }
-

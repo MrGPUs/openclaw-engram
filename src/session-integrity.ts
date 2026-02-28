@@ -1,5 +1,5 @@
 import path from "node:path";
-import { readFile, readdir, stat, unlink, writeFile } from "node:fs/promises";
+import { readFile, readdir, unlink, writeFile } from "node:fs/promises";
 import type { Checkpoint, TranscriptEntry } from "./types.js";
 
 export type SessionIntegrityIssueCode =
@@ -517,12 +517,12 @@ export async function applySessionRepair(
       }
       if (action.kind === "remove_checkpoint") {
         try {
-          const existing = await stat(action.targetPath);
-          if (existing.isFile()) {
-            await unlink(action.targetPath);
+          await unlink(action.targetPath);
+        } catch (err) {
+          const code = typeof err === "object" && err && "code" in err ? String((err as { code?: unknown }).code ?? "") : "";
+          if (code !== "ENOENT") {
+            throw err;
           }
-        } catch {
-          // already absent is fine
         }
         actionsApplied += 1;
         continue;
