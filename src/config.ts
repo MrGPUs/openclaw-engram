@@ -207,6 +207,15 @@ export function parseConfig(raw: unknown): PluginConfig {
     baseUrl = normalizeOpenaiBaseUrl(process.env.OPENAI_BASE_URL, "env");
   }
 
+  const sharedCrossSignalSemanticEnabled =
+    cfg.sharedCrossSignalSemanticEnabled === true || cfg.crossSignalsSemanticEnabled === true;
+  const sharedCrossSignalSemanticTimeoutMs =
+    typeof cfg.sharedCrossSignalSemanticTimeoutMs === "number"
+      ? Math.max(1, Math.floor(cfg.sharedCrossSignalSemanticTimeoutMs))
+      : typeof cfg.crossSignalsSemanticTimeoutMs === "number"
+        ? Math.max(1, Math.floor(cfg.crossSignalsSemanticTimeoutMs))
+        : 4000;
+
   return {
     openaiApiKey: apiKey,
     openaiBaseUrl: baseUrl,
@@ -619,9 +628,15 @@ export function parseConfig(raw: unknown): PluginConfig {
       typeof cfg.sharedContextDir === "string" && cfg.sharedContextDir.length > 0 ? cfg.sharedContextDir : undefined,
     sharedContextMaxInjectChars:
       typeof cfg.sharedContextMaxInjectChars === "number" ? cfg.sharedContextMaxInjectChars : 4000,
-    crossSignalsSemanticEnabled: cfg.crossSignalsSemanticEnabled === true,
-    crossSignalsSemanticTimeoutMs:
-      typeof cfg.crossSignalsSemanticTimeoutMs === "number" ? cfg.crossSignalsSemanticTimeoutMs : 4000,
+    sharedCrossSignalSemanticEnabled,
+    sharedCrossSignalSemanticTimeoutMs,
+    sharedCrossSignalSemanticMaxCandidates:
+      typeof cfg.sharedCrossSignalSemanticMaxCandidates === "number"
+        ? Math.max(0, Math.floor(cfg.sharedCrossSignalSemanticMaxCandidates))
+        : 120,
+    // Backward-compatible aliases.
+    crossSignalsSemanticEnabled: sharedCrossSignalSemanticEnabled,
+    crossSignalsSemanticTimeoutMs: sharedCrossSignalSemanticTimeoutMs,
 
     // v5.0 compounding (default off)
     compoundingEnabled: cfg.compoundingEnabled === true,
