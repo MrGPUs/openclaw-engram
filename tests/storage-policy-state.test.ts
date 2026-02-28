@@ -151,3 +151,86 @@ test("StorageManager readCompressionGuidelineOptimizerState returns null when st
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test("StorageManager appends and reads behavior signals from state store", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "openclaw-engram-behavior-signals-"));
+  try {
+    const storage = new StorageManager(dir);
+    await storage.ensureDirectories();
+
+    const wrote = await storage.appendBehaviorSignals([
+      {
+        timestamp: "2026-02-28T00:00:00.000Z",
+        namespace: "default",
+        memoryId: "correction-1",
+        category: "correction",
+        signalType: "correction_override",
+        direction: "negative",
+        confidence: 0.95,
+        signalHash: "abc123",
+        source: "extraction",
+      },
+      {
+        timestamp: "2026-02-28T00:01:00.000Z",
+        namespace: "default",
+        memoryId: "preference-1",
+        category: "preference",
+        signalType: "preference_affinity",
+        direction: "positive",
+        confidence: 0.88,
+        signalHash: "def456",
+        source: "extraction",
+      },
+    ]);
+
+    assert.equal(wrote, 2);
+    const loaded = await storage.readBehaviorSignals(10);
+    assert.equal(loaded.length, 2);
+    assert.equal(loaded[0]?.memoryId, "correction-1");
+    assert.equal(loaded[1]?.memoryId, "preference-1");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("StorageManager dedupes behavior signals by memory id + signal hash", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "openclaw-engram-behavior-dedupe-"));
+  try {
+    const storage = new StorageManager(dir);
+    await storage.ensureDirectories();
+
+    const first = await storage.appendBehaviorSignals([
+      {
+        timestamp: "2026-02-28T00:00:00.000Z",
+        namespace: "default",
+        memoryId: "correction-1",
+        category: "correction",
+        signalType: "correction_override",
+        direction: "negative",
+        confidence: 0.95,
+        signalHash: "same",
+        source: "extraction",
+      },
+    ]);
+    const second = await storage.appendBehaviorSignals([
+      {
+        timestamp: "2026-02-28T00:05:00.000Z",
+        namespace: "default",
+        memoryId: "correction-1",
+        category: "correction",
+        signalType: "correction_override",
+        direction: "negative",
+        confidence: 0.95,
+        signalHash: "same",
+        source: "extraction",
+      },
+    ]);
+
+    assert.equal(first, 1);
+    assert.equal(second, 0);
+    const loaded = await storage.readBehaviorSignals(10);
+    assert.equal(loaded.length, 1);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

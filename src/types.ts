@@ -456,6 +456,21 @@ export interface BehaviorLoopPolicyState {
   updatedAt: string;
 }
 
+export type BehaviorSignalType = "correction_override" | "preference_affinity";
+export type BehaviorSignalDirection = "positive" | "negative";
+
+export interface BehaviorSignalEvent {
+  timestamp: string;
+  namespace: string;
+  memoryId: string;
+  category: Extract<MemoryCategory, "correction" | "preference">;
+  signalType: BehaviorSignalType;
+  direction: BehaviorSignalDirection;
+  confidence: number;
+  signalHash: string;
+  source: "extraction" | "correction";
+}
+
 /** Memory status for lifecycle management */
 export type MemoryStatus = "active" | "superseded" | "archived";
 export type LifecycleState = "candidate" | "validated" | "active" | "stale" | "archived";
