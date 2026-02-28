@@ -99,8 +99,14 @@ test("shared-context semantic cross-signals fail-open under extreme timeout budg
     assert.equal(raw.semantic.enabled, true);
     // On faster runners this may complete just under budget; either way output must be fail-open safe.
     assert.equal(typeof raw.semantic.timedOut, "boolean");
-    assert.equal(raw.semantic.applied, false);
-    assert.equal(raw.semantic.addedOverlapCount, 0);
+    assert.equal(typeof raw.semantic.applied, "boolean");
+    assert.equal(Number.isInteger(raw.semantic.addedOverlapCount), true);
+    if (raw.semantic.timedOut) {
+      assert.equal(raw.semantic.applied, false);
+      assert.equal(raw.semantic.addedOverlapCount, 0);
+    } else {
+      assert.equal(raw.semantic.addedOverlapCount >= 0, true);
+    }
   } finally {
     await rm(memoryDir, { recursive: true, force: true });
     await rm(sharedDir, { recursive: true, force: true });
