@@ -724,7 +724,7 @@ export function parseConfig(raw: unknown): PluginConfig {
     behaviorLoopProtectedParams: Array.isArray(cfg.behaviorLoopProtectedParams)
       ? (cfg.behaviorLoopProtectedParams as unknown[])
           .filter((param): param is string => typeof param === "string" && param.trim().length > 0)
-      : DEFAULT_BEHAVIOR_LOOP_PROTECTED_PARAMS,
+      : [...DEFAULT_BEHAVIOR_LOOP_PROTECTED_PARAMS],
     // v8.0 phase 1
     recallPlannerEnabled: cfg.recallPlannerEnabled !== false,
     recallPlannerMaxQmdResultsMinimal:

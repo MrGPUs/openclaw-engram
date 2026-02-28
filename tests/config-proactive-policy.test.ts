@@ -73,3 +73,11 @@ test("parseConfig clamps proactive/policy-learning numeric limits to non-negativ
   assert.equal(cfg.behaviorLoopMinSignalCount, 0);
   assert.equal(cfg.behaviorLoopMaxDeltaPerCycle, 1);
 });
+
+test("parseConfig returns a fresh default behaviorLoopProtectedParams array per call", () => {
+  const first = parseConfig({ openaiApiKey: "sk-test" });
+  first.behaviorLoopProtectedParams.push("mutated-default");
+
+  const second = parseConfig({ openaiApiKey: "sk-test" });
+  assert.equal(second.behaviorLoopProtectedParams.includes("mutated-default"), false);
+});
