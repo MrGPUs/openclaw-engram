@@ -58,6 +58,10 @@ export function clamp01(value: number): number {
   return value;
 }
 
+export function clampLifecycleThreshold(value: number): number {
+  return clamp01(value);
+}
+
 function parseIsoMs(value?: string): number | null {
   if (!value) return null;
   const ms = Date.parse(value);
