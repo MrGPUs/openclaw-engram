@@ -3006,7 +3006,7 @@ export class Orchestrator {
         if (decision.nextTier === "hot") promoted += 1;
       }
 
-      this.lastTierMigrationRunAtMs = Date.now();
+      if (!dryRun) this.lastTierMigrationRunAtMs = Date.now();
       log.debug(
         `tier migration cycle completed: trigger=${trigger} scanned=${candidates.length} migrated=${migrated} limit=${limit}${dryRun ? " dryRun=true" : ""}`,
       );

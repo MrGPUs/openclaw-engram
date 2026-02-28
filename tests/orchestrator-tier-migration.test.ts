@@ -125,6 +125,37 @@ test("enabled extraction tier migration skips status writes when no memory chang
   }
 });
 
+test("dry-run migration does not throttle the next extraction cycle", async () => {
+  const memoryDir = await mkdtemp(path.join(os.tmpdir(), "openclaw-engram-tier-orch-dryrun-throttle-"));
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "openclaw-engram-tier-orch-dryrun-throttle-workspace-"));
+  try {
+    const orchestrator = new Orchestrator(buildConfig(memoryDir, workspaceDir, true, true)) as any;
+    orchestrator.qmd = {
+      updateCollection: async () => {},
+      embedCollection: async () => {},
+    };
+    const storage = orchestrator.storage;
+    await storage.writeMemory("fact", "migrate-after-dry-run", { source: "test" });
+
+    const preview = await orchestrator.runTierMigrationCycle(storage, "manual", {
+      dryRun: true,
+      limitOverride: 1,
+      force: true,
+    });
+    assert.equal(preview.dryRun, true);
+    assert.equal(preview.migrated, 1);
+
+    const applied = await orchestrator.runTierMigrationCycle(storage, "extraction", {
+      limitOverride: 1,
+    });
+    assert.notEqual(applied.skipped, "min_interval");
+    assert.equal(applied.migrated, 1);
+  } finally {
+    await rm(memoryDir, { recursive: true, force: true });
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
 test("tier migration cycle is bounded per maintenance pass", async () => {
   const memoryDir = await mkdtemp(path.join(os.tmpdir(), "openclaw-engram-tier-orch-bounded-"));
   const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "openclaw-engram-tier-orch-bounded-workspace-"));
