@@ -47,10 +47,6 @@ export class RemoteSearchBackend implements SearchBackend {
     return this.available;
   }
 
-  isDaemonMode(): boolean {
-    return false;
-  }
-
   debugStatus(): string {
     return `backend=remote available=${this.available} baseUrl=${this.baseUrl}`;
   }

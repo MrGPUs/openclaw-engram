@@ -13,10 +13,6 @@ export class NoopSearchBackend implements SearchBackend {
     return false;
   }
 
-  isDaemonMode(): boolean {
-    return false;
-  }
-
   debugStatus(): string {
     return "backend=noop";
   }

@@ -933,8 +933,6 @@ export class Orchestrator {
         } else if (collectionState === "skipped") {
           log.debug("Conversation index collection check skipped in daemon-only mode");
         }
-      } else if (this.conversationQmd instanceof NoopSearchBackend) {
-        log.debug(`Conversation index: noop (search intentionally disabled)`);
       } else {
         log.warn(`Conversation index QMD: not available ${this.conversationQmd.debugStatus()}`);
       }

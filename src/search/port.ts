@@ -15,7 +15,6 @@ export interface SearchBackend {
   // ── Lifecycle ──
   probe(): Promise<boolean>;
   isAvailable(): boolean;
-  isDaemonMode(): boolean;
   debugStatus(): string;
 
   // ── Search ──
