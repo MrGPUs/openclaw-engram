@@ -3,6 +3,7 @@ import type { SearchBackend } from "./port.js";
 import { NoopSearchBackend } from "./noop-backend.js";
 import { RemoteSearchBackend } from "./remote-backend.js";
 import { QmdClient, type QmdClientOptions } from "../qmd.js";
+import { log } from "../logger.js";
 
 /**
  * Resolve non-QMD backends from config.
@@ -16,6 +17,9 @@ function resolveNonQmdBackend(config: PluginConfig): SearchBackend | undefined {
   }
 
   if (backend === "remote") {
+    if (!config.remoteSearchBaseUrl) {
+      log.warn("searchBackend is 'remote' but remoteSearchBaseUrl is not configured; using default http://localhost:8181");
+    }
     return new RemoteSearchBackend({
       baseUrl: config.remoteSearchBaseUrl ?? "http://localhost:8181",
       apiKey: config.remoteSearchApiKey,
