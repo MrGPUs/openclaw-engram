@@ -11,8 +11,13 @@ type ProviderConfig = {
 const DEFAULT_OPENAI_MODEL = "text-embedding-3-small";
 
 /**
- * Thin embedding helper that reuses EmbeddingFallback's provider resolution logic.
- * Provides single and batch embedding for search backends that need vector support.
+ * Standalone embedding helper for search backend adapters.
+ *
+ * NOTE: This intentionally duplicates provider resolution from EmbeddingFallback.
+ * EmbeddingFallback is tightly integrated with the plugin lifecycle (telemetry,
+ * rate-limit backoff, provider rotation). This class is a lightweight standalone
+ * utility used by LanceDB/Orama backends which operate outside plugin context.
+ * Merging them would break the port/adapter separation between search and plugin layers.
  */
 export class EmbedHelper {
   private provider: ProviderConfig | null | undefined; // undefined = not yet resolved

@@ -113,12 +113,12 @@ export function createConversationSearchBackend(config: PluginConfig): SearchBac
     return undefined;
   }
 
-  const nonQmd = resolveNonQmdBackend(config, config.conversationIndexQmdCollection);
-  // Noop means search is intentionally off — return undefined so conversation init skips entirely.
-  if (nonQmd instanceof NoopSearchBackend) return undefined;
-  if (nonQmd) return nonQmd;
+  // Conversation index is QMD-only — do not use lancedb/meilisearch/orama even if
+  // searchBackend is set to one of those. Only respect "noop" to allow disabling.
+  const backend = config.searchBackend ?? "qmd";
+  if (backend === "noop") return undefined;
 
-  // QMD is the only remaining option — respect qmdEnabled to avoid spawning the binary
+  // QMD — respect qmdEnabled to avoid spawning the binary
   if (!config.qmdEnabled) return undefined;
 
   return new QmdClient(

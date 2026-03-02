@@ -59,10 +59,12 @@ export class MeilisearchBackend implements SearchBackend {
   }
 
   async search(query: string, collection?: string, maxResults?: number): Promise<SearchResult[]> {
-    // Try hybrid first; fall back to plain FTS if server has no embedder configured
-    const hybrid = await this.hybridSearch(query, collection, maxResults);
-    if (hybrid.length > 0) return hybrid;
-    return this.bm25Search(query, collection, maxResults);
+    // Try hybrid first; fall back to plain FTS only if hybrid throws (e.g. no embedder configured)
+    try {
+      return await this.doSearch(query, maxResults ?? 10, { hybrid: { semanticRatio: 0.5, embedder: "default" } }, collection, true);
+    } catch {
+      return this.bm25Search(query, collection, maxResults);
+    }
   }
 
   async searchGlobal(query: string, maxResults?: number): Promise<SearchResult[]> {
@@ -198,7 +200,7 @@ export class MeilisearchBackend implements SearchBackend {
     return this.client;
   }
 
-  private async doSearch(query: string, limit: number, extra?: Record<string, unknown>, collection?: string): Promise<SearchResult[]> {
+  private async doSearch(query: string, limit: number, extra?: Record<string, unknown>, collection?: string, rethrow = false): Promise<SearchResult[]> {
     if (!this.available) return [];
     try {
       const client = await this.ensureClient();
@@ -207,6 +209,7 @@ export class MeilisearchBackend implements SearchBackend {
       return this.mapHits(result.hits ?? []);
     } catch (err) {
       log.debug(`MeilisearchBackend search failed: ${err}`);
+      if (rethrow) throw err;
       return [];
     }
   }
