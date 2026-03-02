@@ -20,7 +20,9 @@ export class RemoteSearchBackend implements SearchBackend {
   private available = false;
 
   constructor(opts: RemoteSearchBackendOptions) {
-    this.baseUrl = opts.baseUrl.replace(/\/+$/, "");
+    let url = opts.baseUrl;
+    while (url.endsWith("/")) url = url.slice(0, -1);
+    this.baseUrl = url;
     this.apiKey = opts.apiKey;
     this.timeoutMs = opts.timeoutMs ?? 30_000;
   }
