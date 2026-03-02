@@ -78,8 +78,9 @@ export function createConversationSearchBackend(config: PluginConfig): SearchBac
   if (nonQmd instanceof NoopSearchBackend) return undefined;
   if (nonQmd) return nonQmd;
 
-  // Conversation index explicitly requests QMD via conversationIndexBackend="qmd",
-  // so create a QmdClient regardless of the primary qmdEnabled flag.
+  // QMD is the only remaining option — respect qmdEnabled to avoid spawning the binary
+  if (!config.qmdEnabled) return undefined;
+
   return new QmdClient(
     config.conversationIndexQmdCollection,
     Math.max(6, config.conversationRecallTopK),
