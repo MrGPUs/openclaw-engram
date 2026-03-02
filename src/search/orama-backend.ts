@@ -273,10 +273,6 @@ export class OramaBackend implements SearchBackend {
     await writeFile(filePath, data, "utf-8");
   }
 
-  private async persistDb(db: any): Promise<void> {
-    await this.persistDbForCollection(db, this.collection);
-  }
-
   private dbFilePath(collection: string): string {
     return path.join(this.dbPath, `${collection}.msp`);
   }

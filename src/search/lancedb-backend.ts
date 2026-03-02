@@ -113,7 +113,17 @@ export class LanceDbBackend implements SearchBackend {
     if (!table) return;
 
     const docs = await scanMemoryDir(this.memoryDir);
-    if (docs.length === 0) return;
+    if (docs.length === 0) {
+      // Clear stale data when no docs remain
+      try {
+        const db = await this.ensureDb();
+        await db.dropTable(collection).catch(() => {});
+        if (collection === this.collection) this.table = null;
+      } catch {
+        // Best-effort cleanup
+      }
+      return;
+    }
 
     const rows = docs.map((d) => ({
       docid: d.docid,
@@ -131,7 +141,7 @@ export class LanceDbBackend implements SearchBackend {
       const newTable = await db.createTable(collection, rows);
       // Create FTS index on content column
       try {
-        await newTable.createIndex("content", { config: this.lanceModule.Index.fts() });
+        await newTable.createIndex("content", { config: this.lanceIndex.fts() });
       } catch {
         // FTS index creation may fail on some platforms — degrade gracefully
       }
@@ -186,6 +196,10 @@ export class LanceDbBackend implements SearchBackend {
 
   private table: any = null;
 
+  private get lanceIndex(): any {
+    return this.lanceModule.Index ?? this.lanceModule.default?.Index;
+  }
+
   private async ensureDb(): Promise<any> {
     if (this.db) return this.db;
     if (!this.lanceModule) {
@@ -217,7 +231,7 @@ export class LanceDbBackend implements SearchBackend {
     };
     const newTable = await db.createTable(collection, [emptyRow]);
     try {
-      await newTable.createIndex("content", { config: this.lanceModule.Index.fts() });
+      await newTable.createIndex("content", { config: this.lanceIndex.fts() });
     } catch {
       // FTS index creation may fail — degrade gracefully
     }
@@ -251,7 +265,7 @@ export class LanceDbBackend implements SearchBackend {
     this.table = await db.createTable(this.collection, [emptyRow]);
     // Create FTS index on content column
     try {
-      await this.table.createIndex("content", { config: this.lanceModule.Index.fts() });
+      await this.table.createIndex("content", { config: this.lanceIndex.fts() });
     } catch {
       // FTS index creation may fail — degrade gracefully
     }
