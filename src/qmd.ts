@@ -5,6 +5,15 @@ import { log } from "./logger.js";
 import type { QmdSearchResult } from "./types.js";
 import type { SearchBackend } from "./search/port.js";
 
+export interface QmdClientOptions {
+  slowLog?: { enabled: boolean; thresholdMs: number };
+  updateTimeoutMs?: number;
+  updateMinIntervalMs?: number;
+  qmdPath?: string;
+  daemonUrl?: string;
+  daemonRecheckIntervalMs?: number;
+}
+
 const QMD_TIMEOUT_MS = 30_000;
 const QMD_DAEMON_TIMEOUT_MS = 60_000; // Longer timeout for daemon (first call may load models)
 const QMD_PROBE_TIMEOUT_MS = 8_000;
@@ -479,14 +488,7 @@ export class QmdClient implements SearchBackend {
   constructor(
     private readonly collection: string,
     private readonly maxResults: number,
-    opts?: {
-      slowLog?: { enabled: boolean; thresholdMs: number };
-      updateTimeoutMs?: number;
-      updateMinIntervalMs?: number;
-      qmdPath?: string;
-      daemonUrl?: string;
-      daemonRecheckIntervalMs?: number;
-    },
+    opts?: QmdClientOptions,
   ) {
     this.slowLog = opts?.slowLog;
     this.updateTimeoutMs = opts?.updateTimeoutMs ?? 120_000;
