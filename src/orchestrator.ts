@@ -891,8 +891,7 @@ export class Orchestrator {
     {
       const available = await this.qmd.probe();
       if (available) {
-        const mode = this.qmd.isDaemonMode() ? "daemon" : "subprocess";
-        log.info(`Search backend: available (mode: ${mode}) ${this.qmd.debugStatus()}`);
+        log.info(`Search backend: available ${this.qmd.debugStatus()}`);
         const collectionState = await this.qmd.ensureCollection(this.config.memoryDir);
         if (collectionState === "missing") {
           this.qmd = new NoopSearchBackend();
@@ -934,6 +933,8 @@ export class Orchestrator {
         } else if (collectionState === "skipped") {
           log.debug("Conversation index collection check skipped in daemon-only mode");
         }
+      } else if (this.conversationQmd instanceof NoopSearchBackend) {
+        log.debug(`Conversation index: noop (search intentionally disabled)`);
       } else {
         log.warn(`Conversation index QMD: not available ${this.conversationQmd.debugStatus()}`);
       }

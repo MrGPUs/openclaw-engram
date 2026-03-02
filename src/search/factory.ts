@@ -74,6 +74,8 @@ export function createConversationSearchBackend(config: PluginConfig): SearchBac
   }
 
   const nonQmd = resolveNonQmdBackend(config);
+  // Noop means search is intentionally off — return undefined so conversation init skips entirely.
+  if (nonQmd instanceof NoopSearchBackend) return undefined;
   if (nonQmd) return nonQmd;
 
   // Conversation index explicitly requests QMD via conversationIndexBackend="qmd",
