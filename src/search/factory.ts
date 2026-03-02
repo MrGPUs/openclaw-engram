@@ -17,11 +17,12 @@ function resolveNonQmdBackend(config: PluginConfig): SearchBackend | undefined {
   }
 
   if (backend === "remote") {
+    const baseUrl = config.remoteSearchBaseUrl || "http://localhost:8181";
     if (!config.remoteSearchBaseUrl) {
       log.warn("searchBackend is 'remote' but remoteSearchBaseUrl is not configured; using default http://localhost:8181");
     }
     return new RemoteSearchBackend({
-      baseUrl: config.remoteSearchBaseUrl ?? "http://localhost:8181",
+      baseUrl,
       apiKey: config.remoteSearchApiKey,
       timeoutMs: config.remoteSearchTimeoutMs,
     });
