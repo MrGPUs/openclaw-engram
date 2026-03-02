@@ -86,20 +86,20 @@ export class LanceDbBackend implements SearchBackend {
     }
   }
 
-  async bm25Search(query: string, _collection?: string, maxResults?: number): Promise<SearchResult[]> {
-    const table = await this.ensureTable();
+  async bm25Search(query: string, collection?: string, maxResults?: number): Promise<SearchResult[]> {
+    const table = await this.ensureTableForCollection(collection ?? this.collection);
     if (!table) return [];
     return this.searchTable(table, query, "fts", maxResults ?? 10);
   }
 
-  async vectorSearch(query: string, _collection?: string, maxResults?: number): Promise<SearchResult[]> {
-    const table = await this.ensureTable();
+  async vectorSearch(query: string, collection?: string, maxResults?: number): Promise<SearchResult[]> {
+    const table = await this.ensureTableForCollection(collection ?? this.collection);
     if (!table) return [];
     return this.searchTable(table, query, "vector", maxResults ?? 10);
   }
 
-  async hybridSearch(query: string, _collection?: string, maxResults?: number): Promise<SearchResult[]> {
-    const table = await this.ensureTable();
+  async hybridSearch(query: string, collection?: string, maxResults?: number): Promise<SearchResult[]> {
+    const table = await this.ensureTableForCollection(collection ?? this.collection);
     if (!table) return [];
     return this.searchTable(table, query, "hybrid", maxResults ?? 10);
   }

@@ -90,20 +90,20 @@ export class OramaBackend implements SearchBackend {
     }
   }
 
-  async bm25Search(query: string, _collection?: string, maxResults?: number): Promise<SearchResult[]> {
-    const db = await this.ensureDb();
+  async bm25Search(query: string, collection?: string, maxResults?: number): Promise<SearchResult[]> {
+    const db = await this.ensureDbForCollection(collection ?? this.collection);
     if (!db) return [];
     return this.searchDb(db, query, "fulltext", maxResults ?? 10);
   }
 
-  async vectorSearch(query: string, _collection?: string, maxResults?: number): Promise<SearchResult[]> {
-    const db = await this.ensureDb();
+  async vectorSearch(query: string, collection?: string, maxResults?: number): Promise<SearchResult[]> {
+    const db = await this.ensureDbForCollection(collection ?? this.collection);
     if (!db) return [];
     return this.searchDb(db, query, "vector", maxResults ?? 10);
   }
 
-  async hybridSearch(query: string, _collection?: string, maxResults?: number): Promise<SearchResult[]> {
-    const db = await this.ensureDb();
+  async hybridSearch(query: string, collection?: string, maxResults?: number): Promise<SearchResult[]> {
+    const db = await this.ensureDbForCollection(collection ?? this.collection);
     if (!db) return [];
     return this.searchDb(db, query, "hybrid", maxResults ?? 10);
   }

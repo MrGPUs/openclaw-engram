@@ -89,16 +89,16 @@ export class MeilisearchBackend implements SearchBackend {
     }
   }
 
-  async bm25Search(query: string, _collection?: string, maxResults?: number): Promise<SearchResult[]> {
-    return this.doSearch(query, maxResults ?? 10);
+  async bm25Search(query: string, collection?: string, maxResults?: number): Promise<SearchResult[]> {
+    return this.doSearch(query, maxResults ?? 10, undefined, collection);
   }
 
-  async vectorSearch(query: string, _collection?: string, maxResults?: number): Promise<SearchResult[]> {
-    return this.doSearch(query, maxResults ?? 10, { hybrid: { semanticRatio: 1.0, embedder: "default" } });
+  async vectorSearch(query: string, collection?: string, maxResults?: number): Promise<SearchResult[]> {
+    return this.doSearch(query, maxResults ?? 10, { hybrid: { semanticRatio: 1.0, embedder: "default" } }, collection);
   }
 
-  async hybridSearch(query: string, _collection?: string, maxResults?: number): Promise<SearchResult[]> {
-    return this.doSearch(query, maxResults ?? 10, { hybrid: { semanticRatio: 0.5, embedder: "default" } });
+  async hybridSearch(query: string, collection?: string, maxResults?: number): Promise<SearchResult[]> {
+    return this.doSearch(query, maxResults ?? 10, { hybrid: { semanticRatio: 0.5, embedder: "default" } }, collection);
   }
 
   async update(): Promise<void> {
@@ -168,11 +168,11 @@ export class MeilisearchBackend implements SearchBackend {
     return this.client;
   }
 
-  private async doSearch(query: string, limit: number, extra?: Record<string, unknown>): Promise<SearchResult[]> {
+  private async doSearch(query: string, limit: number, extra?: Record<string, unknown>, collection?: string): Promise<SearchResult[]> {
     if (!this.available) return [];
     try {
       const client = await this.ensureClient();
-      const index = client.index(this.collection);
+      const index = client.index(collection ?? this.collection);
       const result = await index.search(query, { limit, ...extra });
       return this.mapHits(result.hits ?? []);
     } catch (err) {
