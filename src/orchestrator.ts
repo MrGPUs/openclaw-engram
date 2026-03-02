@@ -6,7 +6,9 @@ import { SmartBuffer } from "./buffer.js";
 import { chunkContent, type ChunkingConfig } from "./chunking.js";
 import { ExtractionEngine } from "./extraction.js";
 import { scoreImportance } from "./importance.js";
-import { QmdClient } from "./qmd.js";
+import type { SearchBackend } from "./search/port.js";
+import { createSearchBackend, createConversationSearchBackend } from "./search/factory.js";
+import { NoopSearchBackend } from "./search/noop-backend.js";
 import { StorageManager, ContentHashIndex, normalizeEntityName } from "./storage.js";
 import { ThreadingManager } from "./threading.js";
 import { extractTopics } from "./topics.js";
@@ -543,8 +545,8 @@ export function resolvePersistedMemoryRelativePath(options: {
 export class Orchestrator {
   readonly storage: StorageManager;
   private readonly storageRouter: NamespaceStorageRouter;
-  readonly qmd: QmdClient;
-  private readonly conversationQmd?: QmdClient;
+  qmd: SearchBackend;
+  private readonly conversationQmd?: SearchBackend;
   private readonly conversationFaiss?: FaissConversationIndexAdapter;
   readonly sharedContext?: SharedContextManager;
   readonly compounding?: CompoundingEngine;
@@ -617,35 +619,8 @@ export class Orchestrator {
     this.config = config;
     this.storageRouter = new NamespaceStorageRouter(config);
     this.storage = new StorageManager(config.memoryDir);
-    this.qmd = new QmdClient(config.qmdCollection, config.qmdMaxResults, {
-      slowLog: {
-        enabled: config.slowLogEnabled,
-        thresholdMs: config.slowLogThresholdMs,
-      },
-      updateTimeoutMs: config.qmdUpdateTimeoutMs,
-      updateMinIntervalMs: config.qmdUpdateMinIntervalMs,
-      qmdPath: config.qmdPath,
-      daemonUrl: config.qmdDaemonEnabled ? config.qmdDaemonUrl : undefined,
-      daemonRecheckIntervalMs: config.qmdDaemonRecheckIntervalMs,
-    });
-    this.conversationQmd =
-      config.conversationIndexEnabled && config.conversationIndexBackend === "qmd"
-        ? new QmdClient(
-            config.conversationIndexQmdCollection,
-            Math.max(6, config.conversationRecallTopK),
-            {
-              slowLog: {
-                enabled: config.slowLogEnabled,
-                thresholdMs: config.slowLogThresholdMs,
-              },
-              updateTimeoutMs: config.qmdUpdateTimeoutMs,
-              updateMinIntervalMs: config.qmdUpdateMinIntervalMs,
-              qmdPath: config.qmdPath,
-              daemonUrl: config.qmdDaemonEnabled ? config.qmdDaemonUrl : undefined,
-              daemonRecheckIntervalMs: config.qmdDaemonRecheckIntervalMs,
-            },
-          )
-        : undefined;
+    this.qmd = createSearchBackend(config);
+    this.conversationQmd = createConversationSearchBackend(config);
     this.conversationFaiss =
       config.conversationIndexEnabled && config.conversationIndexBackend === "faiss"
         ? new FaissConversationIndexAdapter({
@@ -913,24 +888,25 @@ export class Orchestrator {
       await this.compounding.ensureDirs();
     }
 
-    if (this.config.qmdEnabled) {
+    {
       const available = await this.qmd.probe();
       if (available) {
-        const mode = this.qmd.isDaemonMode() ? "daemon" : "subprocess";
-        log.info(`QMD: available (mode: ${mode}) ${this.qmd.debugStatus()}`);
+        log.info(`Search backend: available ${this.qmd.debugStatus()}`);
         const collectionState = await this.qmd.ensureCollection(this.config.memoryDir);
         if (collectionState === "missing") {
-          this.config.qmdEnabled = false;
+          this.qmd = new NoopSearchBackend();
           log.warn(
-            "QMD collection missing for Engram memory store; disabling QMD retrieval for this runtime (fallback retrieval remains enabled)",
+            "Search collection missing for Engram memory store; disabling search retrieval for this runtime (fallback retrieval remains enabled)",
           );
         } else if (collectionState === "unknown") {
-          log.warn("QMD collection check unavailable; keeping QMD retrieval enabled for fail-open behavior");
+          log.warn("Search collection check unavailable; keeping search retrieval enabled for fail-open behavior");
         } else if (collectionState === "skipped") {
-          log.debug("QMD collection check skipped in daemon-only mode");
+          log.debug("Search collection check skipped (remote or daemon-only mode)");
         }
+      } else if (this.qmd instanceof NoopSearchBackend) {
+        log.debug(`Search backend: noop (search intentionally disabled)`);
       } else {
-        log.warn(`QMD: not available ${this.qmd.debugStatus()}`);
+        log.warn(`Search backend: not available ${this.qmd.debugStatus()}`);
       }
     }
 
@@ -1382,8 +1358,7 @@ export class Orchestrator {
     } else {
       // Best-effort: ask qmd to update indexes (will no-op if qmd missing).
       const q = this.conversationQmd ?? this.qmd;
-      const usingPrimaryQmdClient = q === this.qmd;
-      if ((!usingPrimaryQmdClient || this.config.qmdEnabled) && q.isAvailable()) {
+      if (q.isAvailable()) {
         await q.update();
         if (shouldEmbed) {
           await q.embed();
@@ -2064,9 +2039,9 @@ export class Orchestrator {
         timings.qmd = "skip(limit=0)";
         return null;
       }
-      if (!this.config.qmdEnabled || !this.qmd.isAvailable()) {
+      if (!this.qmd.isAvailable()) {
         timings.qmd = "skip";
-        log.debug(`QMD skip: qmdEnabled=${this.config.qmdEnabled} ${this.qmd.debugStatus()}`);
+        log.debug(`Search skip: ${this.qmd.debugStatus()}`);
         return null;
       }
       const t0 = Date.now();
@@ -2530,7 +2505,7 @@ export class Orchestrator {
           ].join("\n"),
         );
       }
-    } else if (recallResultLimit > 0 && (!this.config.qmdEnabled || !this.qmd.isAvailable())) {
+    } else if (recallResultLimit > 0 && !this.qmd.isAvailable()) {
       // Fallback: embeddings first, then recency-only.
       const embeddingResults = await this.searchEmbeddingFallback(retrievalQuery, embeddingFetchLimit);
       const scopedCandidates = filterRecallCandidates(embeddingResults, {
@@ -3347,7 +3322,7 @@ export class Orchestrator {
   }
 
   private requestQmdMaintenance(): void {
-    if (!this.config.qmdEnabled || !this.qmd.isAvailable()) return;
+    if (!this.qmd.isAvailable()) return;
     if (!this.config.qmdMaintenanceEnabled) return;
 
     this.qmdMaintenancePending = true;
@@ -5153,7 +5128,7 @@ export class Orchestrator {
     const coldMaxResults = this.config.qmdColdMaxResults ?? this.config.qmdMaxResults;
 
     let longTerm: QmdSearchResult[] = [];
-    if (coldQmdEnabled && this.config.qmdEnabled && this.qmd.isAvailable()) {
+    if (coldQmdEnabled && this.qmd.isAvailable()) {
       const coldFetchLimit = Math.max(
         0,
         Math.min(options.recallResultLimit, Math.max(0, coldMaxResults)),
