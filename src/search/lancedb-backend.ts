@@ -165,8 +165,10 @@ export class LanceDbBackend implements SearchBackend {
       const allRows = await table.query().select(["docid", "content", "vector"]).toArray();
       const needsEmbed = allRows.filter((row: any) => {
         const vec = row.vector;
-        if (!vec || !Array.isArray(vec)) return true;
-        return vec.every((v: number) => v === 0);
+        if (!vec || (typeof vec !== "object")) return true;
+        // Support both Array and typed arrays (e.g. Float32Array from Arrow)
+        const arr = Array.from(vec as ArrayLike<number>);
+        return arr.length === 0 || arr.every((v: number) => v === 0);
       });
 
       if (needsEmbed.length === 0) return;

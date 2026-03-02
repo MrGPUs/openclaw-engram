@@ -17,7 +17,9 @@ export interface IndexableDocument {
  * Returns the frontmatter key-value pairs and body, or null if no frontmatter block.
  */
 function parseFrontmatter(raw: string): { data: Record<string, string>; body: string } | null {
-  const match = raw.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
+  // Support both LF and CRLF line endings
+  const normalized = raw.replace(/\r\n/g, "\n");
+  const match = normalized.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
   if (!match) return null;
 
   const fmBlock = match[1];
