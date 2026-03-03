@@ -65,6 +65,7 @@ export class OramaBackend implements SearchBackend {
 
   async searchGlobal(query: string, maxResults?: number): Promise<SearchResult[]> {
     const limit = maxResults ?? 10;
+    if (!this.available) return [];
     try {
       const files = await this.listDbFiles();
       const allResults: SearchResult[] = [];

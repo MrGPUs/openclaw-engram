@@ -12,11 +12,10 @@ import { log } from "../logger.js";
 /**
  * Resolve non-QMD backends from config.
  * Returns a SearchBackend for "noop" or "remote", or undefined to signal "use QMD".
- * @param collectionOverride — used by conversation index to target a different collection
  */
-function resolveNonQmdBackend(config: PluginConfig, collectionOverride?: string): SearchBackend | undefined {
+function resolveNonQmdBackend(config: PluginConfig): SearchBackend | undefined {
   const backend = config.searchBackend ?? "qmd";
-  const collection = collectionOverride ?? config.qmdCollection;
+  const collection = config.qmdCollection;
 
   if (backend === "noop") {
     return new NoopSearchBackend();
