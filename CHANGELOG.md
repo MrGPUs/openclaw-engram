@@ -6,7 +6,21 @@ All notable changes to this project will be documented in this file.
 
 <!-- New items go here before they're released -->
 
+## [9.0.0] — 2026-03-02
+
 ### Added
+- **LanceDB search backend** (`src/search/lancedb-backend.ts`) — embedded hybrid FTS+vector search with native Arrow bindings and RRF reranking.
+- **Meilisearch search backend** (`src/search/meilisearch-backend.ts`) — server-based search via the official Meilisearch SDK.
+- **Orama search backend** (`src/search/orama-backend.ts`) — embedded hybrid FTS+vector search, pure JS, zero native dependencies.
+- Shared document scanner (`src/search/document-scanner.ts`) — scans `facts/` and `corrections/` for indexable markdown documents.
+- Shared embed helper (`src/search/embed-helper.ts`) — embedding via OpenAI or local LLM for embedded backends.
+- Config keys: `lanceDbPath`, `lanceEmbeddingDimension`, `meilisearchHost`, `meilisearchApiKey`, `meilisearchTimeoutMs`, `meilisearchAutoIndex`, `oramaDbPath`, `oramaEmbeddingDimension`.
+- `searchBackend` enum expanded to `"qmd" | "remote" | "noop" | "lancedb" | "meilisearch" | "orama"`.
+- Factory routing in `createSearchBackend()` for all three new backends.
+- Tests: factory routing, adapter construction, document scanner, embed helper (10 tests).
+- Smoke test script (`tests/smoke-backends.ts`) for local verification.
+
+### Added (from PR #114)
 - SearchBackend port/adapter interface (`src/search/port.ts`) abstracting QMD behind a stable contract so alternative backends (remote HTTP, noop, custom) can replace QMD.
 - `NoopSearchBackend` adapter for graceful degradation when no search engine is available.
 - `RemoteSearchBackend` HTTP REST adapter stub for remote search services.

@@ -2,6 +2,10 @@ import type { PluginConfig } from "../types.js";
 import type { SearchBackend } from "./port.js";
 import { NoopSearchBackend } from "./noop-backend.js";
 import { RemoteSearchBackend } from "./remote-backend.js";
+import { LanceDbBackend } from "./lancedb-backend.js";
+import { MeilisearchBackend } from "./meilisearch-backend.js";
+import { OramaBackend } from "./orama-backend.js";
+import { EmbedHelper } from "./embed-helper.js";
 import { QmdClient, type QmdClientOptions } from "../qmd.js";
 import { log } from "../logger.js";
 
@@ -11,6 +15,7 @@ import { log } from "../logger.js";
  */
 function resolveNonQmdBackend(config: PluginConfig): SearchBackend | undefined {
   const backend = config.searchBackend ?? "qmd";
+  const collection = config.qmdCollection;
 
   if (backend === "noop") {
     return new NoopSearchBackend();
@@ -25,6 +30,39 @@ function resolveNonQmdBackend(config: PluginConfig): SearchBackend | undefined {
       baseUrl,
       apiKey: config.remoteSearchApiKey,
       timeoutMs: config.remoteSearchTimeoutMs,
+    });
+  }
+
+  if (backend === "lancedb") {
+    const embedHelper = new EmbedHelper(config);
+    return new LanceDbBackend({
+      dbPath: config.lanceDbPath!,
+      collection,
+      embedHelper,
+      memoryDir: config.memoryDir,
+      embeddingDimension: config.lanceEmbeddingDimension!,
+    });
+  }
+
+  if (backend === "meilisearch") {
+    return new MeilisearchBackend({
+      host: config.meilisearchHost!,
+      apiKey: config.meilisearchApiKey,
+      collection,
+      timeoutMs: config.meilisearchTimeoutMs,
+      autoIndex: config.meilisearchAutoIndex,
+      memoryDir: config.memoryDir,
+    });
+  }
+
+  if (backend === "orama") {
+    const embedHelper = new EmbedHelper(config);
+    return new OramaBackend({
+      dbPath: config.oramaDbPath!,
+      collection,
+      embedHelper,
+      memoryDir: config.memoryDir,
+      embeddingDimension: config.oramaEmbeddingDimension!,
     });
   }
 
@@ -74,12 +112,12 @@ export function createConversationSearchBackend(config: PluginConfig): SearchBac
     return undefined;
   }
 
-  const nonQmd = resolveNonQmdBackend(config);
-  // Noop means search is intentionally off — return undefined so conversation init skips entirely.
-  if (nonQmd instanceof NoopSearchBackend) return undefined;
-  if (nonQmd) return nonQmd;
+  // Conversation index is QMD-only — do not use lancedb/meilisearch/orama even if
+  // searchBackend is set to one of those. Only respect "noop" to allow disabling.
+  const backend = config.searchBackend ?? "qmd";
+  if (backend === "noop") return undefined;
 
-  // QMD is the only remaining option — respect qmdEnabled to avoid spawning the binary
+  // QMD — respect qmdEnabled to avoid spawning the binary
   if (!config.qmdEnabled) return undefined;
 
   return new QmdClient(
