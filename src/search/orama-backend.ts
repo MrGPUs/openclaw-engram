@@ -138,7 +138,11 @@ export class OramaBackend implements SearchBackend {
       };
       const internalId = existingInternalIds.get(doc.docid);
       if (internalId) {
-        await oramaUpdate(db, internalId, payload);
+        try {
+          await oramaUpdate(db, internalId, payload);
+        } catch {
+          // Update failed — skip and continue with remaining docs
+        }
       } else {
         try {
           await insert(db, payload);
@@ -177,7 +181,15 @@ export class OramaBackend implements SearchBackend {
     for (let i = 0; i < needsEmbed.length; i++) {
       const vec = vectors[i];
       if (!vec) continue;
-      await oramaUpdate(db, needsEmbed[i].id, { vector: vec });
+      // Orama update is remove+insert — must include all fields to avoid data loss
+      const doc = needsEmbed[i].document;
+      await oramaUpdate(db, needsEmbed[i].id, {
+        id: doc.id,
+        path: doc.path,
+        content: doc.content,
+        snippet: doc.snippet,
+        vector: vec,
+      });
     }
 
     await this.persistDbForCollection(db, collection);
