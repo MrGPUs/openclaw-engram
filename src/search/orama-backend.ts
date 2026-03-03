@@ -114,8 +114,8 @@ export class OramaBackend implements SearchBackend {
     const docMap = new Map(docs.map((d) => [d.docid, d]));
     const { update: oramaUpdate } = this.oramaModule;
 
-    // Get existing docs to diff — map user doc ID → internal Orama ID
-    const existingInternalIds = new Map<string, string>();
+    // Get existing docs to diff — map user doc ID → { internalId, vector }
+    const existingDocs = new Map<string, { internalId: string; vector?: number[] }>();
     const existingCount = await count(db);
     if (existingCount > 0) {
       const allHits = await oramaSearch(db, { term: "", limit: existingCount + 100 });
@@ -123,29 +123,40 @@ export class OramaBackend implements SearchBackend {
         if (!docMap.has(hit.document.id)) {
           await remove(db, hit.id);
         } else {
-          existingInternalIds.set(hit.document.id, hit.id);
+          existingDocs.set(hit.document.id, {
+            internalId: hit.id,
+            vector: hit.document.vector,
+          });
         }
       }
     }
 
-    // Insert new docs, update existing ones
+    // Insert new docs, update existing ones (preserving vectors since update is remove+insert)
     for (const doc of docs) {
-      const payload = {
-        id: doc.docid,
-        path: doc.path,
-        content: doc.content,
-        snippet: doc.snippet,
-      };
-      const internalId = existingInternalIds.get(doc.docid);
-      if (internalId) {
+      const existing = existingDocs.get(doc.docid);
+      if (existing) {
+        const payload: Record<string, unknown> = {
+          id: doc.docid,
+          path: doc.path,
+          content: doc.content,
+          snippet: doc.snippet,
+        };
+        if (existing.vector && existing.vector.length > 0) {
+          payload.vector = existing.vector;
+        }
         try {
-          await oramaUpdate(db, internalId, payload);
+          await oramaUpdate(db, existing.internalId, payload);
         } catch {
           // Update failed — skip and continue with remaining docs
         }
       } else {
         try {
-          await insert(db, payload);
+          await insert(db, {
+            id: doc.docid,
+            path: doc.path,
+            content: doc.content,
+            snippet: doc.snippet,
+          });
         } catch {
           // Duplicate id edge case — skip
         }
