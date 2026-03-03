@@ -78,6 +78,7 @@ export class MeilisearchBackend implements SearchBackend {
         indexUid: idx.uid,
         q: query,
         limit,
+        showRankingScore: true,
       }));
       if (queries.length === 0) return [];
 
@@ -205,7 +206,7 @@ export class MeilisearchBackend implements SearchBackend {
     try {
       const client = await this.ensureClient();
       const index = client.index(collection ?? this.collection);
-      const result = await index.search(query, { limit, ...extra });
+      const result = await index.search(query, { limit, showRankingScore: true, ...extra });
       return this.mapHits(result.hits ?? []);
     } catch (err) {
       log.debug(`MeilisearchBackend search failed: ${err}`);
