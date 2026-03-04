@@ -5015,7 +5015,8 @@ var EmbedHelper = class {
         headers: provider.headers,
         body: JSON.stringify({
           model: provider.model,
-          input: input.slice(0, 8e3)
+          input: input.slice(0, 8e3),
+          encoding_format: "float"
         }),
         signal: AbortSignal.timeout(3e4)
       });
@@ -11642,7 +11643,8 @@ var EmbeddingFallback = class {
         headers: provider.headers,
         body: JSON.stringify({
           model: provider.model,
-          input: input.slice(0, 8e3)
+          input: input.slice(0, 8e3),
+          encoding_format: "float"
         })
       });
       if (!res.ok) {
