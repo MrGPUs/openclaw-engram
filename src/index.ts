@@ -146,10 +146,13 @@ export default {
           // For now, we'll just call recall with the sessionKey
 
           // Pass per-agent workspace so compaction reset reads the right BOOT.md.
-          // Keyed by sessionKey to prevent concurrent sessions from clobbering each other.
-          const agentWorkspace = ctx?.workspaceDir as string | undefined;
-          if (agentWorkspace) {
-            orchestrator.setRecallWorkspaceOverride(sessionKey, agentWorkspace);
+          // Only set when compaction reset is enabled to avoid unbounded Map growth
+          // when recall is skipped (e.g., no_recall planner decision).
+          if (orchestrator.config.compactionResetEnabled) {
+            const agentWorkspace = ctx?.workspaceDir as string | undefined;
+            if (agentWorkspace) {
+              orchestrator.setRecallWorkspaceOverride(sessionKey, agentWorkspace);
+            }
           }
           const context = await orchestrator.recall(prompt, sessionKey);
           log.debug(`before_agent_start: recall returned ${context?.length ?? 0} chars`);

@@ -2132,82 +2132,6 @@ export class Orchestrator {
         }
       }
 
-      // Inject BOOT.md and compaction signal when a compaction reset just occurred.
-      // This runs after checkpoint recovery — both are additive (checkpoint = raw turns,
-      // BOOT.md = agent-authored working state summary).
-      // Always clean up per-session workspace overrides, even if the feature is off,
-      // to prevent the Map from accumulating stale entries on long-running gateways.
-      const effectiveSessionKey = sessionKey ?? "default";
-      const compactionWorkspaceDir = this._recallWorkspaceOverrides.get(effectiveSessionKey);
-      this._recallWorkspaceOverrides.delete(effectiveSessionKey);
-
-      if (this.config.compactionResetEnabled) {
-        const workspaceDir =
-          compactionWorkspaceDir ||
-          this.config.workspaceDir ||
-          path.join(os.homedir(), ".openclaw", "workspace");
-        // Signal file is per-session to prevent multi-session overwrites in shared workspaces.
-        const signalPath = path.join(workspaceDir, `.compaction-reset-signal-${effectiveSessionKey}`);
-        const bootPath = path.join(workspaceDir, "BOOT.md");
-
-        try {
-          const signalStat = await stat(signalPath).catch(() => null);
-          if (signalStat) {
-            const signalAge = Date.now() - signalStat.mtimeMs;
-            const signalData = JSON.parse(
-              await readFile(signalPath, "utf-8"),
-            );
-
-            // Validate signal belongs to this session (defense-in-depth: filename
-            // is already per-session, but the sessionKey inside provides a second check)
-            if (signalData.sessionKey && signalData.sessionKey !== effectiveSessionKey) {
-              log.debug(
-                `recall: compaction signal is for ${signalData.sessionKey}, not ${effectiveSessionKey} — skipping`,
-              );
-            } else if (signalAge >= 60 * 60 * 1000) {
-              log.debug(
-                `recall: stale compaction signal (${Math.round(signalAge / 1000)}s old), skipping`,
-              );
-              // Consume stale signal to prevent it from blocking future checks
-              await unlink(signalPath).catch(() => {});
-            } else {
-              // Signal is fresh and belongs to this session — inject recovery context
-              let bootSection =
-                "\n\n## Session Recovery (Post-Compaction)\n\n";
-              bootSection += `⚠️ A compaction occurred at ${signalData.compactedAt} and this is a fresh session.\n\n`;
-
-              try {
-                const bootContent = await readFile(bootPath, "utf-8");
-                bootSection +=
-                  "### BOOT.md (working state before compaction)\n\n";
-                bootSection += bootContent + "\n";
-              } catch {
-                bootSection += "### ⚠️ BOOT.md is MISSING\n\n";
-                bootSection +=
-                  "The memory flush may not have written BOOT.md before compaction. ";
-                bootSection +=
-                  "Ask the user what you were working on — do not guess.\n";
-              }
-
-              // Append to checkpoint section or create standalone
-              if (section) {
-                section += bootSection;
-              } else {
-                section = bootSection;
-              }
-              log.info(
-                `recall: injected compaction reset context for ${effectiveSessionKey}`,
-              );
-
-              // Consume the signal file — one-shot
-              await unlink(signalPath).catch(() => {});
-            }
-          }
-        } catch (err) {
-          log.debug("recall: compaction signal check failed:", err);
-        }
-      }
-
       if (!checkpointInjected) {
         const entries = await this.transcript.readRecent(transcriptLookbackHours, sessionKey);
         log.debug(`recall: read ${entries.length} transcript entries for sessionKey=${sessionKey}`);
@@ -2223,6 +2147,71 @@ export class Orchestrator {
 
       timings.transcript = `${Date.now() - t0}ms`;
       return section;
+    })();
+
+    // Compaction reset runs independently of transcript — it must work even when
+    // transcriptEnabled=false, since compaction recovery is a separate concern.
+    const compactionPromise = (async (): Promise<string | null> => {
+      // Always clean up per-session workspace overrides, even if the feature is off,
+      // to prevent the Map from accumulating stale entries on long-running gateways.
+      const effectiveSessionKey = sessionKey ?? "default";
+      const compactionWorkspaceDir = this._recallWorkspaceOverrides.get(effectiveSessionKey);
+      this._recallWorkspaceOverrides.delete(effectiveSessionKey);
+
+      if (!this.config.compactionResetEnabled) return null;
+
+      const workspaceDir =
+        compactionWorkspaceDir ||
+        this.config.workspaceDir ||
+        path.join(os.homedir(), ".openclaw", "workspace");
+      const signalPath = path.join(workspaceDir, `.compaction-reset-signal-${effectiveSessionKey}`);
+      const bootPath = path.join(workspaceDir, "BOOT.md");
+
+      try {
+        const signalStat = await stat(signalPath).catch(() => null);
+        if (!signalStat) return null;
+
+        const signalAge = Date.now() - signalStat.mtimeMs;
+        const signalData = JSON.parse(await readFile(signalPath, "utf-8"));
+
+        // Validate signal belongs to this session (defense-in-depth: filename
+        // is already per-session, but the sessionKey inside provides a second check)
+        if (signalData.sessionKey && signalData.sessionKey !== effectiveSessionKey) {
+          log.debug(
+            `recall: compaction signal is for ${signalData.sessionKey}, not ${effectiveSessionKey} — skipping`,
+          );
+          return null;
+        }
+
+        if (signalAge >= 60 * 60 * 1000) {
+          log.debug(
+            `recall: stale compaction signal (${Math.round(signalAge / 1000)}s old), skipping`,
+          );
+          await unlink(signalPath).catch(() => {});
+          return null;
+        }
+
+        // Signal is fresh and belongs to this session — build recovery context
+        let section = "\n\n## Session Recovery (Post-Compaction)\n\n";
+        section += `⚠️ A compaction occurred at ${signalData.compactedAt} and this is a fresh session.\n\n`;
+
+        try {
+          const bootContent = await readFile(bootPath, "utf-8");
+          section += "### BOOT.md (working state before compaction)\n\n";
+          section += bootContent + "\n";
+        } catch {
+          section += "### ⚠️ BOOT.md is MISSING\n\n";
+          section += "The memory flush may not have written BOOT.md before compaction. ";
+          section += "Ask the user what you were working on — do not guess.\n";
+        }
+
+        log.info(`recall: injected compaction reset context for ${effectiveSessionKey}`);
+        await unlink(signalPath).catch(() => {});
+        return section;
+      } catch (err) {
+        log.debug("recall: compaction signal check failed:", err);
+        return null;
+      }
     })();
 
     const summariesPromise = (async (): Promise<string | null> => {
@@ -2334,6 +2323,7 @@ export class Orchestrator {
       artifacts,
       qmdResult,
       transcriptSection,
+      compactionSection,
       summariesSection,
       conversationRecallSection,
       compoundingSection,
@@ -2345,6 +2335,7 @@ export class Orchestrator {
       artifactsPromise,
       qmdPromise,
       transcriptPromise,
+      compactionPromise,
       summariesPromise,
       conversationRecallPromise,
       compoundingPromise,
@@ -2779,6 +2770,10 @@ export class Orchestrator {
     // then assembled here according to recallPipeline order.
     if (transcriptSection) {
       this.appendRecallSection(sectionBuckets, "transcript", transcriptSection);
+    }
+    // Compaction reset context — injected after transcript (additive to checkpoint/transcript).
+    if (compactionSection) {
+      this.appendRecallSection(sectionBuckets, "transcript", compactionSection);
     }
     if (summariesSection) {
       this.appendRecallSection(sectionBuckets, "summaries", summariesSection);
