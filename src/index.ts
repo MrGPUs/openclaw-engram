@@ -145,8 +145,12 @@ export default {
           // This is a placeholder - actual compaction detection depends on OpenClaw
           // For now, we'll just call recall with the sessionKey
 
-          // Pass per-agent workspace so compaction reset reads the right BOOT.md
-          orchestrator.setRecallWorkspaceOverride(ctx?.workspaceDir as string | undefined);
+          // Pass per-agent workspace so compaction reset reads the right BOOT.md.
+          // Keyed by sessionKey to prevent concurrent sessions from clobbering each other.
+          const agentWorkspace = ctx?.workspaceDir as string | undefined;
+          if (agentWorkspace) {
+            orchestrator.setRecallWorkspaceOverride(sessionKey, agentWorkspace);
+          }
           const context = await orchestrator.recall(prompt, sessionKey);
           log.debug(`before_agent_start: recall returned ${context?.length ?? 0} chars`);
           if (!context) return;
@@ -327,35 +331,36 @@ export default {
             `compaction completed for ${sessionKey}, triggering session reset`,
           );
 
-          // Write signal file so recall() knows a compaction reset just happened.
-          // This lets the new session inject BOOT.md + compaction context.
           // Use ctx.workspaceDir (per-agent) if available, fall back to config.
           const workspaceDir =
             (ctx?.workspaceDir as string) ||
             orchestrator.config.workspaceDir ||
             path.join(os.homedir(), ".openclaw", "workspace");
-          const signalPath = path.join(
-            workspaceDir,
-            ".compaction-reset-signal",
-          );
-          await writeFile(
-            signalPath,
-            JSON.stringify({
-              sessionKey,
-              compactedAt: new Date().toISOString(),
-              messageCount: event.messageCount ?? 0,
-            }),
-            "utf-8",
-          );
 
-          // Use api.resetSession() (PR #29985) — the only supported path.
-          // No curl fallback: it bypasses the cooldown protection in the registry
-          // and could cause infinite reset loops.
+          // Reset the session first — only write the signal file if reset succeeds.
+          // This prevents the next recall() from injecting recovery content when
+          // no actual reset occurred (e.g., gateway doesn't support resetSession).
           if (typeof api.resetSession === "function") {
             const result = await api.resetSession(sessionKey, "new");
             if (result.ok) {
               log.info(
                 `session reset via API for ${sessionKey}, new sessionId=${result.sessionId}`,
+              );
+
+              // Write signal file AFTER successful reset so recall() knows
+              // a compaction reset just happened and can inject BOOT.md.
+              const signalPath = path.join(
+                workspaceDir,
+                ".compaction-reset-signal",
+              );
+              await writeFile(
+                signalPath,
+                JSON.stringify({
+                  sessionKey,
+                  compactedAt: new Date().toISOString(),
+                  messageCount: event.messageCount ?? 0,
+                }),
+                "utf-8",
               );
             } else {
               log.error(

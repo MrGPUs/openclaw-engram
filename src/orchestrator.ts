@@ -574,12 +574,12 @@ export class Orchestrator {
   private readonly tmtBuilder: TmtBuilder;
   private readonly rerankCache = new RerankCache();
   /**
-   * Per-recall workspace override. Set by the caller (before_agent_start hook)
-   * before invoking recall(), so the BOOT.md injection uses the correct
-   * agent workspace instead of the global config default.
-   * Cleared after each recall completes.
+   * Per-session workspace overrides keyed by sessionKey.
+   * Set by the before_agent_start hook so recall() uses the correct
+   * agent workspace for BOOT.md injection. Cleared after each recall.
+   * Using a Map prevents concurrent sessions from overwriting each other.
    */
-  private _recallWorkspaceOverride: string | undefined;
+  private _recallWorkspaceOverrides = new Map<string, string>();
   private routingRulesStore: RoutingRulesStore | null = null;
   private contentHashIndex: ContentHashIndex | null = null;
   private readonly artifactSourceStatusCache = new WeakMap<
@@ -624,9 +624,9 @@ export class Orchestrator {
   private initPromise: Promise<void> | null = null;
   private resolveInit: (() => void) | null = null;
 
-  /** Set per-agent workspace for the next recall() call (compaction reset). */
-  setRecallWorkspaceOverride(dir: string | undefined): void {
-    this._recallWorkspaceOverride = dir;
+  /** Set per-session workspace for the next recall() call (compaction reset). */
+  setRecallWorkspaceOverride(sessionKey: string, dir: string): void {
+    this._recallWorkspaceOverrides.set(sessionKey, dir);
   }
 
   constructor(config: PluginConfig) {
@@ -2116,11 +2116,11 @@ export class Orchestrator {
       // BOOT.md = agent-authored working state summary).
       if (this.config.compactionResetEnabled) {
         const workspaceDir =
-          this._recallWorkspaceOverride ||
+          this._recallWorkspaceOverrides.get(sessionKey) ||
           this.config.workspaceDir ||
           path.join(os.homedir(), ".openclaw", "workspace");
-        // Clear override after use — it's per-recall
-        this._recallWorkspaceOverride = undefined;
+        // Clear override after use — it's per-recall, per-session
+        this._recallWorkspaceOverrides.delete(sessionKey);
         const signalPath = path.join(workspaceDir, ".compaction-reset-signal");
         const bootPath = path.join(workspaceDir, "BOOT.md");
 
@@ -2132,8 +2132,20 @@ export class Orchestrator {
               await readFile(signalPath, "utf-8"),
             );
 
-            // Only inject if signal is fresh (< 1 hour) to avoid stale injection
-            if (signalAge < 60 * 60 * 1000) {
+            // Validate signal belongs to this session (prevents cross-session
+            // consumption when multiple sessions share a workspace)
+            if (signalData.sessionKey && signalData.sessionKey !== sessionKey) {
+              log.debug(
+                `recall: compaction signal is for ${signalData.sessionKey}, not ${sessionKey} — skipping`,
+              );
+            } else if (signalAge >= 60 * 60 * 1000) {
+              log.debug(
+                `recall: stale compaction signal (${Math.round(signalAge / 1000)}s old), skipping`,
+              );
+              // Consume stale signal to prevent it from blocking future checks
+              await unlink(signalPath).catch(() => {});
+            } else {
+              // Signal is fresh and belongs to this session — inject recovery context
               let bootSection =
                 "\n\n## Session Recovery (Post-Compaction)\n\n";
               bootSection += `⚠️ A compaction occurred at ${signalData.compactedAt} and this is a fresh session.\n\n`;
@@ -2160,14 +2172,10 @@ export class Orchestrator {
               log.info(
                 `recall: injected compaction reset context for ${sessionKey}`,
               );
-            } else {
-              log.debug(
-                `recall: stale compaction signal (${Math.round(signalAge / 1000)}s old), skipping`,
-              );
-            }
 
-            // Consume the signal file — one-shot
-            await unlink(signalPath).catch(() => {});
+              // Consume the signal file — one-shot
+              await unlink(signalPath).catch(() => {});
+            }
           }
         } catch (err) {
           log.debug("recall: compaction signal check failed:", err);
