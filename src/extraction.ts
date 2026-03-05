@@ -584,8 +584,8 @@ Also generate:
 
 Output JSON:
 {
-  "facts": [{"category": "decision", "content": "Chose X over Y because...", "importance": 8, "confidence": 0.9}, {"category": "commitment", "content": "Must deliver X by date", "importance": 10, "confidence": 1.0}, {"category": "fact", "content": "X uses Y technology", "importance": 6, "confidence": 0.95}, {"category": "principle", "content": "Always do X to avoid Y", "importance": 8, "confidence": 0.9}],
-  "entities": [{"name": "...", "type": "person|company|project|tool|other"}],
+  "facts": [{"category": "decision", "content": "Chose X over Y because...", "importance": 8, "confidence": 0.9}, {"category": "commitment", "content": "Must deliver X by date", "importance": 10, "confidence": 1.0}, {"category": "fact", "content": "X uses Y technology", "importance": 6, "confidence": 0.95, "entityRef": "project-x"}, {"category": "principle", "content": "Always do X to avoid Y", "importance": 8, "confidence": 0.9}],
+  "entities": [{"name": "person-jane-doe", "type": "person", "facts": ["Works at Acme Corp", "Prefers Python over JavaScript"]}, {"name": "project-acme-store", "type": "project", "facts": ["Built with Next.js", "Deployed on Vercel"]}],
   "profileUpdates": ["..."],
   "questions": [{"question": "...", "context": "..."}],
   "relationships": [{"source": "person-jane-doe", "target": "company-acme-corp", "label": "works at"}]
@@ -670,8 +670,8 @@ ${truncatedConversation}`;
             this.buildExtractionInstructions(existingEntities) +
             `\n\nRespond with valid JSON matching this schema:
 {
-  "facts": [{"category": "decision", "content": "Chose X over Y because...", "importance": 8, "confidence": 0.9, "tags": ["tag1"]}],
-  "entities": [{"name": "entity-name", "type": "person"}],
+  "facts": [{"category": "decision", "content": "Chose X over Y because...", "importance": 8, "confidence": 0.9, "tags": ["tag1"]}, {"category": "fact", "content": "X uses Y technology", "importance": 6, "confidence": 0.95, "tags": ["tech"], "entityRef": "project-x"}],
+  "entities": [{"name": "entity-name", "type": "person", "facts": ["Key fact about this person", "Another important detail"]}],
   "profileUpdates": ["User prefers X over Y"],
   "questions": [{"question": "What is...?", "context": "Came up during discussion of...", "priority": 0.5}],
   "relationships": [{"source": "entity-a", "target": "entity-b", "label": "works at"}]
@@ -972,7 +972,7 @@ Respond with valid JSON only, matching this schema:
     }
   ],
   "profileUpdates": ["optional profile update"],
-  "entityUpdates": [{"name": "entity-name", "type": "person", "facts": ["optional fact"]}]
+  "entityUpdates": [{"name": "entity-name", "type": "person", "facts": ["Updated role: now leads backend team", "Recently migrated project to TypeScript"]}]
 }`;
 
       const response = await this.client.chat.completions.create({
