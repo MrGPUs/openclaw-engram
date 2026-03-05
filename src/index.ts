@@ -363,7 +363,7 @@ export default {
           const apiAny = api as any;
           if (typeof apiAny.resetSession === "function") {
             const result = await apiAny.resetSession(sessionKey, "new");
-            if (result.ok) {
+            if (result?.ok === true) {
               log.info(
                 `session reset via API for ${sessionKey}, new sessionId=${result.sessionId}`,
               );
@@ -386,8 +386,12 @@ export default {
                 "utf-8",
               );
             } else {
+              const errorDetail =
+                result && typeof result === "object" && "error" in result
+                  ? String((result as { error?: unknown }).error ?? "unknown error")
+                  : `invalid result: ${JSON.stringify(result)}`;
               log.error(
-                `api.resetSession failed for ${sessionKey}: ${result.error}`,
+                `api.resetSession failed for ${sessionKey}: ${errorDetail}`,
               );
             }
           } else {
