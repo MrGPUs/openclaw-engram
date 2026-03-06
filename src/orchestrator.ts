@@ -2814,9 +2814,9 @@ export class Orchestrator {
     if (transcriptSection) {
       this.appendRecallSection(sectionBuckets, "transcript", transcriptSection);
     }
-    // Compaction reset context — injected after transcript (additive to checkpoint/transcript).
+    // Compaction reset context — independent section so it works even when transcript is disabled.
     if (compactionSection) {
-      this.appendRecallSection(sectionBuckets, "transcript", compactionSection);
+      this.appendRecallSection(sectionBuckets, "compaction-reset", compactionSection);
     }
     if (summariesSection) {
       this.appendRecallSection(sectionBuckets, "summaries", summariesSection);
