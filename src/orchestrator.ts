@@ -569,6 +569,20 @@ export function resolvePersistedMemoryRelativePath(options: {
   return path.join("facts", `${options.memoryId}.md`);
 }
 
+/**
+ * Synapse-inspired confidence gate.
+ * Returns true if the top recall result score is below the threshold,
+ * indicating retrieval is too uncertain to inject.
+ */
+export function shouldRejectLowConfidenceRecall(
+  results: Array<{ score: number }>,
+  threshold: number,
+): boolean {
+  if (results.length === 0) return false;
+  const topScore = Math.max(...results.map((r) => r.score));
+  return topScore < threshold;
+}
+
 export class Orchestrator {
   readonly storage: StorageManager;
   private readonly storageRouter: NamespaceStorageRouter;
@@ -2553,6 +2567,18 @@ export class Orchestrator {
         log.debug("rerankProvider=cloud is reserved/experimental in v2.2.0; skipping rerank");
       }
 
+      // Synapse-inspired confidence gate: check scores BEFORE slicing so
+      // reranking doesn't affect which score the gate evaluates.
+      let confidenceGateRejected = false;
+      if (
+        this.config.recallConfidenceGateEnabled &&
+        shouldRejectLowConfidenceRecall(memoryResults, this.config.recallConfidenceGateThreshold)
+      ) {
+        log.debug(`recall: confidence gate rejected ${memoryResults.length} results (top score below ${this.config.recallConfidenceGateThreshold})`);
+        memoryResults = [];
+        confidenceGateRejected = true;
+      }
+
       memoryResults = memoryResults.slice(0, recallResultLimit);
 
       if (memoryResults.length > 0) {
@@ -2571,7 +2597,10 @@ export class Orchestrator {
           },
         });
         impressionRecorded = true;
-      } else {
+      } else if (!confidenceGateRejected) {
+        // Only attempt fallback paths if the confidence gate did NOT fire.
+        // When the gate rejects, all recall pathways are skipped to prevent
+        // low-relevance results from polluting context.
         const embeddingResults = await this.searchEmbeddingFallback(retrievalQuery, embeddingFetchLimit);
         const scopedCandidates = filterRecallCandidates(embeddingResults, {
           namespacesEnabled: this.config.namespacesEnabled,
