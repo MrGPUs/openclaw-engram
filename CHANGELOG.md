@@ -11,6 +11,15 @@ All notable changes to this project will be documented in this file.
 - Add explicit `encoding_format: "float"` to local embedding requests for vLLM/LiteLLM compatibility.
 - Enrich extraction prompt few-shot examples with `entityRef` and entity `facts` fields, using realistic concrete values instead of generic placeholders.
 
+### Added
+- Compaction reset: opt-in session reset after compaction with BOOT.md injection (`compactionResetEnabled` config field).
+- Per-session signal files and workspace overrides for multi-agent safety.
+- Stale signal cleanup on startup (1-hour TTL).
+- 9 new tests for compaction reset lifecycle.
+
+### Changed
+- Plugin registration model: hooks re-register per agent registry; tools/CLI/service register once.
+
 ### Changed
 - **README.md** rewritten with value proposition, feature highlights, search backend comparison, and contributing guide.
 

@@ -1,7 +1,8 @@
 import { log } from "./logger.js";
 import path from "node:path";
+import os from "node:os";
 import { createHash } from "node:crypto";
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import { SmartBuffer } from "./buffer.js";
 import { chunkContent, type ChunkingConfig } from "./chunking.js";
 import { ExtractionEngine } from "./extraction.js";
@@ -131,6 +132,32 @@ export interface GraphRecallSnapshot {
   expandedCount: number;
   seeds: string[];
   expanded: GraphRecallExpandedEntry[];
+}
+
+/** Maximum age (ms) before a compaction-reset signal file is considered stale and removed. */
+const COMPACTION_SIGNAL_MAX_AGE_MS = 60 * 60 * 1000; // 1 hour
+
+/** Default workspace directory when no per-agent or config workspace is available. */
+export function defaultWorkspaceDir(): string {
+  return path.join(os.homedir(), ".openclaw", "workspace");
+}
+
+/**
+ * Produce a collision-resistant, filesystem-safe identifier from a session key.
+ *
+ * Session keys follow colon-delimited forms (e.g., `agent:gpucodebot:main`).
+ * A naive replace (`:` → `_`) is lossy: different keys like `agent:alpha` and
+ * `agent/alpha` would collide. Instead we append a short SHA-256 hash of the
+ * original key to the human-readable sanitized prefix, guaranteeing uniqueness
+ * while keeping filenames debuggable.
+ *
+ * Format: `<sanitized>-<12-char-hex-hash>`
+ * Example: `agent:gpucodebot:main` → `agent_gpucodebot_main-a1b2c3d4e5f6`
+ */
+export function sanitizeSessionKeyForFilename(sessionKey: string): string {
+  const readable = sessionKey.replace(/[^a-zA-Z0-9._-]/g, "_");
+  const hash = createHash("sha256").update(sessionKey).digest("hex").slice(0, 12);
+  return `${readable}-${hash}`;
 }
 
 export function isArtifactMemoryPath(filePath: string): boolean {
@@ -572,6 +599,13 @@ export class Orchestrator {
   /** Temporal Memory Tree builder — builds hour/day/week/persona summary nodes. */
   private readonly tmtBuilder: TmtBuilder;
   private readonly rerankCache = new RerankCache();
+  /**
+   * Per-session workspace overrides keyed by sessionKey.
+   * Set by the before_agent_start hook so recall() uses the correct
+   * agent workspace for BOOT.md injection. Cleared after each recall.
+   * Using a Map prevents concurrent sessions from overwriting each other.
+   */
+  private _recallWorkspaceOverrides = new Map<string, string>();
   private routingRulesStore: RoutingRulesStore | null = null;
   private contentHashIndex: ContentHashIndex | null = null;
   private readonly artifactSourceStatusCache = new WeakMap<
@@ -615,6 +649,17 @@ export class Orchestrator {
   // Initialization gate: recall() awaits this before proceeding
   private initPromise: Promise<void> | null = null;
   private resolveInit: (() => void) | null = null;
+
+  /** Set per-session workspace for the next recall() call (compaction reset). @internal */
+  setRecallWorkspaceOverride(sessionKey: string, dir: string): void {
+    this._recallWorkspaceOverrides.set(sessionKey, dir);
+  }
+
+  /** Remove a per-session workspace override (cleanup on error or early return). @internal */
+  clearRecallWorkspaceOverride(sessionKey: string): void {
+    this._recallWorkspaceOverrides.delete(sessionKey);
+  }
+
   constructor(config: PluginConfig) {
     this.config = config;
     this.storageRouter = new NamespaceStorageRouter(config);
@@ -956,6 +1001,31 @@ export class Orchestrator {
     // Validate local LLM model configuration
     if (this.config.localLlmEnabled) {
       await this.validateLocalLlmModel();
+    }
+
+    // Sweep stale compaction-reset signal files (>1 hour old).
+    // This prevents orphaned signals from persisting when agents are removed
+    // or sessions never call recall() again after a compaction.
+    // NOTE: This sweep only covers the config-level workspace. Per-agent signals
+    // (written to ctx.workspaceDir) are cleaned up by recall() on each session
+    // start, with a 1-hour TTL enforced at read time. Agent-specific workspaces
+    // are not known at initialize() time.
+    if (this.config.compactionResetEnabled) {
+      try {
+        const wsDir = this.config.workspaceDir || defaultWorkspaceDir();
+        const files = await readdir(wsDir).catch(() => [] as string[]);
+        for (const f of files) {
+          if (!f.startsWith(".compaction-reset-signal-")) continue;
+          const fp = path.join(wsDir, f);
+          const s = await stat(fp).catch(() => null);
+          if (s && Date.now() - s.mtimeMs >= COMPACTION_SIGNAL_MAX_AGE_MS) {
+            await unlink(fp).catch(() => {});
+            log.debug(`initialize: removed stale compaction signal ${f}`);
+          }
+        }
+      } catch (err) {
+        log.debug("initialize: stale signal sweep failed:", err);
+      }
     }
 
     log.info("orchestrator initialized");
@@ -1898,6 +1968,9 @@ export class Orchestrator {
     const embeddingFetchLimit = computedFetchLimit;
 
     if (recallMode === "no_recall") {
+      // Clean up workspace override before early return to prevent Map leaks.
+      const earlySessionKey = sessionKey ?? "default";
+      this._recallWorkspaceOverrides.delete(earlySessionKey);
       timings.total = `${Date.now() - recallStart}ms`;
       this.emitTrace({
         kind: "recall_summary",
@@ -2114,6 +2187,76 @@ export class Orchestrator {
       return section;
     })();
 
+    // Compaction reset runs independently of transcript — it must work even when
+    // transcriptEnabled=false, since compaction recovery is a separate concern.
+    const compactionPromise = (async (): Promise<string | null> => {
+      // Always clean up per-session workspace overrides, even if the feature is off,
+      // to prevent the Map from accumulating stale entries on long-running gateways.
+      const effectiveSessionKey = sessionKey ?? "default";
+      const compactionWorkspaceDir = this._recallWorkspaceOverrides.get(effectiveSessionKey);
+      this._recallWorkspaceOverrides.delete(effectiveSessionKey);
+
+      if (!this.config.compactionResetEnabled) return null;
+
+      const workspaceDir =
+        compactionWorkspaceDir ||
+        this.config.workspaceDir ||
+        defaultWorkspaceDir();
+      const safeSessionKey = sanitizeSessionKeyForFilename(effectiveSessionKey);
+      const signalPath = path.join(workspaceDir, `.compaction-reset-signal-${safeSessionKey}`);
+      const bootPath = path.join(workspaceDir, "BOOT.md");
+
+      try {
+        const signalStat = await stat(signalPath).catch(() => null);
+        if (!signalStat) return null;
+
+        const signalAge = Date.now() - signalStat.mtimeMs;
+        const signalData = JSON.parse(await readFile(signalPath, "utf-8"));
+
+        // Validate signal belongs to this session (defense-in-depth: filename
+        // is already per-session, but the sessionKey inside provides a second check).
+        // Use strict !== so missing/null sessionKey also fails validation.
+        if (signalData.sessionKey !== effectiveSessionKey) {
+          log.debug(
+            `recall: compaction signal is for ${signalData.sessionKey}, not ${effectiveSessionKey} — skipping`,
+          );
+          return null;
+        }
+
+        if (signalAge >= COMPACTION_SIGNAL_MAX_AGE_MS) {
+          log.debug(
+            `recall: stale compaction signal (${Math.round(signalAge / 1000)}s old), skipping`,
+          );
+          await unlink(signalPath).catch(() => {});
+          return null;
+        }
+
+        // Signal is fresh and belongs to this session — build recovery context
+        let section = "\n\n## Session Recovery (Post-Compaction)\n\n";
+        section += `⚠️ A compaction occurred at ${signalData.compactedAt} and this is a fresh session.\n\n`;
+
+        try {
+          const bootContent = await readFile(bootPath, "utf-8");
+          section += "### BOOT.md (working state before compaction)\n\n";
+          section += bootContent + "\n";
+        } catch {
+          section += "### ⚠️ BOOT.md is MISSING\n\n";
+          section += "The memory flush may not have written BOOT.md before compaction. ";
+          section += "Ask the user what you were working on — do not guess.\n";
+        }
+
+        log.info(`recall: injected compaction reset context for ${effectiveSessionKey}`);
+        await unlink(signalPath).catch(() => {});
+        return section;
+      } catch (err) {
+        log.debug("recall: compaction signal check failed:", err);
+        // Remove corrupt/unreadable signal files so they don't cause repeated
+        // parse failures on every recall() until the 1-hour sweep runs.
+        await unlink(signalPath).catch(() => {});
+        return null;
+      }
+    })();
+
     const summariesPromise = (async (): Promise<string | null> => {
       const t0 = Date.now();
       if (!this.config.hourlySummariesEnabled || !sessionKey || !this.isRecallSectionEnabled("summaries", true)) {
@@ -2223,6 +2366,7 @@ export class Orchestrator {
       artifacts,
       qmdResult,
       transcriptSection,
+      compactionSection,
       summariesSection,
       conversationRecallSection,
       compoundingSection,
@@ -2234,6 +2378,7 @@ export class Orchestrator {
       artifactsPromise,
       qmdPromise,
       transcriptPromise,
+      compactionPromise,
       summariesPromise,
       conversationRecallPromise,
       compoundingPromise,
@@ -2668,6 +2813,10 @@ export class Orchestrator {
     // then assembled here according to recallPipeline order.
     if (transcriptSection) {
       this.appendRecallSection(sectionBuckets, "transcript", transcriptSection);
+    }
+    // Compaction reset context — independent section so it works even when transcript is disabled.
+    if (compactionSection) {
+      this.appendRecallSection(sectionBuckets, "compaction-reset", compactionSection);
     }
     if (summariesSection) {
       this.appendRecallSection(sectionBuckets, "summaries", summariesSection);

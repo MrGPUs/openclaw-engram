@@ -719,6 +719,11 @@
         "default": 15,
         "description": "Number of turns per checkpoint"
       },
+      "compactionResetEnabled": {
+        "type": "boolean",
+        "default": false,
+        "description": "Trigger session reset after compaction with BOOT.md injection (requires OC fork with api.resetSession)"
+      },
       "hourlySummariesEnabled": {
         "type": "boolean",
         "default": true,
@@ -1818,6 +1823,11 @@
       "label": "Checkpoint Turn Interval",
       "advanced": true,
       "placeholder": "15"
+    },
+    "compactionResetEnabled": {
+      "label": "Compaction Reset",
+      "help": "Reset session after compaction and inject BOOT.md for recovery",
+      "advanced": true
     },
     "hourlySummariesEnabled": {
       "label": "Enable Hourly Summaries",
