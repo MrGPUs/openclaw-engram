@@ -363,15 +363,20 @@ See [advanced-retrieval.md](advanced-retrieval.md) for guidance.
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `evalHarnessEnabled` | `false` | Enable Engram's benchmark/evaluation harness foundation |
-| `evalShadowModeEnabled` | `false` | Reserve shadow-mode measurement paths so future instrumentation can compare memory behavior without changing live recall |
-| `evalStoreDir` | `{memoryDir}/state/evals` | Root directory for benchmark packs and run summaries |
+| `evalHarnessEnabled` | `false` | Enable Engram's benchmark/evaluation harness bookkeeping |
+| `evalShadowModeEnabled` | `false` | Record live recall decisions to the eval store without changing injected output |
+| `evalStoreDir` | `{memoryDir}/state/evals` | Root directory for benchmark packs, run summaries, and shadow recall records |
+| `objectiveStateMemoryEnabled` | `false` | Enable the objective-state memory foundation for normalized world/tool state snapshots |
+| `objectiveStateSnapshotWritesEnabled` | `false` | Allow writers to persist objective-state snapshots into the store |
+| `objectiveStateStoreDir` | `{memoryDir}/state/objective-state` | Root directory for objective-state snapshot artifacts |
 
 Current foundation slice:
 - `openclaw engram benchmark-status` scans `benchmarks/**.json` and `runs/**.json`, validates manifests/run summaries, and reports the latest completed run.
+- When both eval flags are on, live recall also writes `shadow/YYYY-MM-DD/<trace-id>.json` records with hashes, counts, chosen source, and recalled memory IDs.
 - `openclaw engram benchmark-validate <path>` validates a manifest JSON file or a pack directory with a root `manifest.json`.
 - `openclaw engram benchmark-import <path> [--force]` validates first, then imports into `benchmarks/<benchmarkId>/`.
-- Future slices will add benchmark runners, shadow recording, and PR regression gates on top of this store format.
+- `openclaw engram benchmark-ci-gate --base <dir> --candidate <dir>` compares two eval-store roots and fails when pass rate, shared metrics, or benchmark coverage regress.
+- Future slices will add automated benchmark runners on top of this store and gate format.
 
 | `conversationIndexEmbedOnUpdate` | `false` | Run `qmd embed` on each update |
 
