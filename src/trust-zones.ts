@@ -1,6 +1,7 @@
 import path from "node:path";
 import { mkdir, writeFile } from "node:fs/promises";
 import { listJsonFiles, readJsonFile } from "./json-store.js";
+import { countRecallTokenOverlap, normalizeRecallTokens } from "./recall-tokenization.js";
 import {
   assertIsoRecordedAt,
   assertSafePathSegment,
@@ -339,25 +340,6 @@ async function readTrustZoneRecords(options: {
   return { files, records, invalidRecords };
 }
 
-function normalizeTokens(value: string): string[] {
-  const stopWords = new Set(["the", "and", "for", "with", "from", "into", "that", "this", "why", "did", "what"]);
-  return value
-    .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .map((token) => token.trim())
-    .filter((token) => token.length >= 3 && !stopWords.has(token));
-}
-
-function countOverlap(queryTokens: Set<string>, value: string | undefined): number {
-  if (!value) return 0;
-  const tokens = new Set(normalizeTokens(value));
-  let matches = 0;
-  for (const token of queryTokens) {
-    if (tokens.has(token)) matches += 1;
-  }
-  return matches;
-}
-
 function lexicalScoreTrustZoneRecord(
   record: TrustZoneRecord,
   queryTokens: Set<string>,
@@ -375,7 +357,7 @@ function lexicalScoreTrustZoneRecord(
   let score = 0;
   const matchedFields: string[] = [];
   for (const [field, value, weight] of weightedFields) {
-    const matches = countOverlap(queryTokens, value);
+    const matches = countRecallTokenOverlap(queryTokens, value, ["what"]);
     if (matches > 0) matchedFields.push(field);
     score += matches * weight;
   }
@@ -424,7 +406,7 @@ export async function searchTrustZoneRecords(options: {
   const candidates = records.filter((record) => record.zone !== "quarantine");
   if (candidates.length === 0) return [];
 
-  const queryTokens = new Set(normalizeTokens(options.query));
+  const queryTokens = new Set(normalizeRecallTokens(options.query, ["what"]));
   if (queryTokens.size === 0) return [];
 
   const scored = candidates.map((record) => {
