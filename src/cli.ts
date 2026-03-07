@@ -53,6 +53,7 @@ import {
   validateEvalBenchmarkPack,
 } from "./evals.js";
 import { analyzeGraphHealth, type GraphHealthReport } from "./graph.js";
+import { getObjectiveStateStoreStatus, type ObjectiveStateStoreStatus } from "./objective-state.js";
 import {
   analyzeSessionIntegrity,
   applySessionRepair,
@@ -620,6 +621,20 @@ export async function runBenchmarkCiGateCliCommand(options: {
   return runEvalBenchmarkCiGate({
     baseEvalStoreDir: options.baseEvalStoreDir,
     candidateEvalStoreDir: options.candidateEvalStoreDir,
+  });
+}
+
+export async function runObjectiveStateStatusCliCommand(options: {
+  memoryDir: string;
+  objectiveStateStoreDir?: string;
+  objectiveStateMemoryEnabled: boolean;
+  objectiveStateSnapshotWritesEnabled: boolean;
+}): Promise<ObjectiveStateStoreStatus> {
+  return getObjectiveStateStoreStatus({
+    memoryDir: options.memoryDir,
+    objectiveStateStoreDir: options.objectiveStateStoreDir,
+    enabled: options.objectiveStateMemoryEnabled,
+    writesEnabled: options.objectiveStateSnapshotWritesEnabled,
   });
 }
 
@@ -2183,6 +2198,20 @@ export function registerCli(api: CliApi, orchestrator: Orchestrator): void {
           if (!summary.passed) {
             throw new Error("benchmark CI gate detected regressions");
           }
+          console.log("OK");
+        });
+
+      cmd
+        .command("objective-state-status")
+        .description("Show objective-state store status, snapshot counts, and latest stored snapshot")
+        .action(async () => {
+          const status = await runObjectiveStateStatusCliCommand({
+            memoryDir: orchestrator.config.memoryDir,
+            objectiveStateStoreDir: orchestrator.config.objectiveStateStoreDir,
+            objectiveStateMemoryEnabled: orchestrator.config.objectiveStateMemoryEnabled,
+            objectiveStateSnapshotWritesEnabled: orchestrator.config.objectiveStateSnapshotWritesEnabled,
+          });
+          console.log(JSON.stringify(status, null, 2));
           console.log("OK");
         });
 

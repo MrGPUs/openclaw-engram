@@ -820,3 +820,6 @@ All notable changes to this project will be documented in this file.
 - Question generation and identity reflections
 - Profile and identity auto-consolidation
 - CLI tools for search, store, profile, entities, questions, identity
+# 2026-03-07
+
+- add PR5 objective-state memory foundation: typed snapshot schema/store, status CLI, feature flags, and docs/tests

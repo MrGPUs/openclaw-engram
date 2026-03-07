@@ -366,6 +366,9 @@ See [advanced-retrieval.md](advanced-retrieval.md) for guidance.
 | `evalHarnessEnabled` | `false` | Enable Engram's benchmark/evaluation harness bookkeeping |
 | `evalShadowModeEnabled` | `false` | Record live recall decisions to the eval store without changing injected output |
 | `evalStoreDir` | `{memoryDir}/state/evals` | Root directory for benchmark packs, run summaries, and shadow recall records |
+| `objectiveStateMemoryEnabled` | `false` | Enable the objective-state memory foundation for normalized world/tool state snapshots |
+| `objectiveStateSnapshotWritesEnabled` | `false` | Allow writers to persist objective-state snapshots into the store |
+| `objectiveStateStoreDir` | `{memoryDir}/state/objective-state` | Root directory for objective-state snapshot artifacts |
 
 Current foundation slice:
 - `openclaw engram benchmark-status` scans `benchmarks/**.json` and `runs/**.json`, validates manifests/run summaries, and reports the latest completed run.
