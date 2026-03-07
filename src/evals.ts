@@ -558,10 +558,10 @@ async function collectEvalStoreSnapshot(options: EvalStoreSnapshotOptions): Prom
     totalCases += manifest.cases.length;
     if (manifest.benchmarkType === "memory-red-team") {
       redTeam += 1;
+      if (manifest.attackClass) attackClasses.add(manifest.attackClass);
+      if (manifest.targetSurface) targetSurfaces.add(manifest.targetSurface);
     }
-    if (manifest.attackClass) attackClasses.add(manifest.attackClass);
     for (const tag of manifest.tags ?? []) tags.add(tag);
-    if (manifest.targetSurface) targetSurfaces.add(manifest.targetSurface);
     for (const link of manifest.sourceLinks ?? []) sourceLinks.add(link);
   }
 

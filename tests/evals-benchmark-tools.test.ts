@@ -185,6 +185,32 @@ test("benchmark-status accounts for imported memory red-team benchmark packs", a
   assert.deepEqual(status.benchmarks.targetSurfaces, ["trust-zone-promotion"]);
 });
 
+test("benchmark-status ignores attack metadata on standard benchmark packs", async () => {
+  const tmpDir = await mkdtemp(path.join(os.tmpdir(), "engram-bench-status-standard-attack-fields-"));
+  const standardManifestPath = path.join(tmpDir, "ama-memory.json");
+  await writeManifest(standardManifestPath, "ama-memory", {
+    attackClass: "should-not-count",
+    targetSurface: "should-not-surface",
+    tags: ["trajectory"],
+  });
+  await runBenchmarkImportCliCommand({
+    path: standardManifestPath,
+    memoryDir: tmpDir,
+    memoryRedTeamBenchEnabled: false,
+  });
+
+  const status = await runBenchmarkStatusCliCommand({
+    memoryDir: tmpDir,
+    evalHarnessEnabled: true,
+    evalShadowModeEnabled: false,
+    memoryRedTeamBenchEnabled: false,
+  });
+
+  assert.equal(status.benchmarks.redTeam, 0);
+  assert.deepEqual(status.benchmarks.attackClasses, []);
+  assert.deepEqual(status.benchmarks.targetSurfaces, []);
+});
+
 test("benchmark-import rejects overwrite without force", async () => {
   const tmpDir = await mkdtemp(path.join(os.tmpdir(), "engram-bench-import-no-force-"));
   const manifestPath = path.join(tmpDir, "ama-memory.json");
