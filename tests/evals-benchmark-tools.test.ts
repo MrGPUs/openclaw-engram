@@ -9,11 +9,15 @@ import {
   runBenchmarkValidateCliCommand,
 } from "../src/cli.js";
 
-async function writeManifest(filePath: string, benchmarkId = "ama-memory"): Promise<void> {
+async function writeManifest(
+  filePath: string,
+  benchmarkId = "ama-memory",
+  overrides: Record<string, unknown> = {},
+): Promise<void> {
   await writeFile(
     filePath,
     JSON.stringify(
-      {
+      Object.assign({
         schemaVersion: 1,
         benchmarkId,
         title: "AMA-style benchmark pack",
@@ -25,7 +29,7 @@ async function writeManifest(filePath: string, benchmarkId = "ama-memory"): Prom
             prompt: "Recover the last changed system state and explain the next action.",
           },
         ],
-      },
+      }, overrides),
       null,
       2,
     ),
@@ -57,6 +61,37 @@ test("benchmark-validate accepts a directory pack with root manifest.json", asyn
   assert.equal(summary.sourcePath, packDir);
   assert.equal(summary.manifestPath, path.join(packDir, "manifest.json"));
   assert.equal(summary.benchmarkId, "ama-memory");
+});
+
+test("benchmark-validate accepts a memory red-team benchmark pack with attack metadata", async () => {
+  const tmpDir = await mkdtemp(path.join(os.tmpdir(), "engram-bench-validate-red-team-"));
+  const manifestPath = path.join(tmpDir, "memory-red-team.json");
+  await writeManifest(manifestPath, "poisoning-corroboration-pack", {
+    benchmarkType: "memory-red-team",
+    attackClass: "provenance-spoofing",
+    targetSurface: "trust-zone-promotion",
+    tags: ["poisoning", "trust-zone"],
+    sourceLinks: ["https://arxiv.org/abs/2602.16901"],
+  });
+
+  const summary = await runBenchmarkValidateCliCommand({ path: manifestPath });
+
+  assert.equal(summary.benchmarkType, "memory-red-team");
+  assert.equal(summary.attackClass, "provenance-spoofing");
+  assert.equal(summary.targetSurface, "trust-zone-promotion");
+});
+
+test("benchmark-validate rejects memory red-team packs without attack metadata", async () => {
+  const tmpDir = await mkdtemp(path.join(os.tmpdir(), "engram-bench-validate-red-team-bad-"));
+  const manifestPath = path.join(tmpDir, "memory-red-team.json");
+  await writeManifest(manifestPath, "poisoning-corroboration-pack", {
+    benchmarkType: "memory-red-team",
+  });
+
+  await assert.rejects(
+    () => runBenchmarkValidateCliCommand({ path: manifestPath }),
+    /attackClass must be a non-empty string/i,
+  );
 });
 
 test("benchmark-import copies a manifest file into the eval benchmark store", async () => {
@@ -102,6 +137,32 @@ test("benchmark-import preserves extra files when importing a directory pack", a
   assert.equal(status.benchmarks.total, 1);
   assert.equal(status.benchmarks.invalid, 0);
   assert.deepEqual(status.invalidBenchmarks, []);
+});
+
+test("benchmark-status accounts for imported memory red-team benchmark packs", async () => {
+  const tmpDir = await mkdtemp(path.join(os.tmpdir(), "engram-bench-status-red-team-"));
+  const redTeamManifestPath = path.join(tmpDir, "memory-red-team.json");
+  await writeManifest(redTeamManifestPath, "poisoning-corroboration-pack", {
+    benchmarkType: "memory-red-team",
+    attackClass: "provenance-spoofing",
+    targetSurface: "trust-zone-promotion",
+    tags: ["poisoning", "trust-zone"],
+    sourceLinks: ["https://arxiv.org/abs/2602.16901"],
+  });
+  await runBenchmarkImportCliCommand({
+    path: redTeamManifestPath,
+    memoryDir: tmpDir,
+  });
+
+  const status = await runBenchmarkStatusCliCommand({
+    memoryDir: tmpDir,
+    evalHarnessEnabled: true,
+    evalShadowModeEnabled: false,
+  });
+
+  assert.equal(status.benchmarks.redTeam, 1);
+  assert.deepEqual(status.benchmarks.attackClasses, ["provenance-spoofing"]);
+  assert.deepEqual(status.benchmarks.targetSurfaces, ["trust-zone-promotion"]);
 });
 
 test("benchmark-import rejects overwrite without force", async () => {

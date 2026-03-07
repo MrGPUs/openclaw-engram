@@ -11,13 +11,18 @@ export interface EvalBenchmarkCase {
   notes?: string;
 }
 
+export type EvalBenchmarkType = "standard" | "memory-red-team";
+
 export interface EvalBenchmarkManifest {
   schemaVersion: 1;
   benchmarkId: string;
+  benchmarkType?: EvalBenchmarkType;
   title: string;
   description?: string;
   tags?: string[];
   sourceLinks?: string[];
+  attackClass?: string;
+  targetSurface?: string;
   cases: EvalBenchmarkCase[];
 }
 
@@ -79,8 +84,11 @@ export interface EvalHarnessStatus {
     total: number;
     valid: number;
     invalid: number;
+    redTeam: number;
     totalCases: number;
+    attackClasses: string[];
     tags: string[];
+    targetSurfaces: string[];
     sourceLinks: string[];
   };
   runs: {
@@ -156,7 +164,10 @@ export interface EvalBenchmarkPackSummary {
   sourcePath: string;
   manifestPath: string;
   benchmarkId: string;
+  benchmarkType: EvalBenchmarkType;
   title: string;
+  attackClass?: string;
+  targetSurface?: string;
   totalCases: number;
   tags: string[];
   sourceLinks: string[];
@@ -206,6 +217,13 @@ export function validateEvalBenchmarkManifest(raw: unknown): EvalBenchmarkManife
   if (!isRecord(raw)) throw new Error("benchmark manifest must be an object");
   if (raw.schemaVersion !== 1) throw new Error("schemaVersion must be 1");
   if (!Array.isArray(raw.cases)) throw new Error("cases must be an array");
+  const benchmarkTypeRaw =
+    typeof raw.benchmarkType === "string" && raw.benchmarkType.trim().length > 0
+      ? raw.benchmarkType.trim()
+      : "standard";
+  if (!["standard", "memory-red-team"].includes(benchmarkTypeRaw)) {
+    throw new Error("benchmarkType must be one of standard|memory-red-team");
+  }
 
   const cases = raw.cases.map((item, index) => {
     if (!isRecord(item)) throw new Error(`cases[${index}] must be an object`);
@@ -217,9 +235,26 @@ export function validateEvalBenchmarkManifest(raw: unknown): EvalBenchmarkManife
     } satisfies EvalBenchmarkCase;
   });
 
+  const benchmarkType = benchmarkTypeRaw as EvalBenchmarkType;
+  const attackClass =
+    typeof raw.attackClass === "string" && raw.attackClass.trim().length > 0
+      ? raw.attackClass.trim()
+      : undefined;
+  const targetSurface =
+    typeof raw.targetSurface === "string" && raw.targetSurface.trim().length > 0
+      ? raw.targetSurface.trim()
+      : undefined;
+  if (benchmarkType === "memory-red-team" && attackClass === undefined) {
+    throw new Error("attackClass must be a non-empty string");
+  }
+  if (benchmarkType === "memory-red-team" && targetSurface === undefined) {
+    throw new Error("targetSurface must be a non-empty string");
+  }
+
   return {
     schemaVersion: 1,
     benchmarkId: assertString(raw.benchmarkId, "benchmarkId"),
+    benchmarkType,
     title: assertString(raw.title, "title"),
     description:
       typeof raw.description === "string" && raw.description.trim().length > 0
@@ -227,6 +262,8 @@ export function validateEvalBenchmarkManifest(raw: unknown): EvalBenchmarkManife
         : undefined,
     tags: optionalStringArray(raw.tags, "tags"),
     sourceLinks: optionalStringArray(raw.sourceLinks, "sourceLinks"),
+    attackClass,
+    targetSurface,
     cases,
   };
 }
@@ -501,11 +538,19 @@ async function collectEvalStoreSnapshot(options: EvalStoreSnapshotOptions): Prom
   shadows.sort((a, b) => b.recordedAt.localeCompare(a.recordedAt));
 
   const tags = new Set<string>();
+  const attackClasses = new Set<string>();
   const sourceLinks = new Set<string>();
+  const targetSurfaces = new Set<string>();
   let totalCases = 0;
+  let redTeam = 0;
   for (const manifest of manifests) {
     totalCases += manifest.cases.length;
+    if (manifest.benchmarkType === "memory-red-team") {
+      redTeam += 1;
+    }
+    if (manifest.attackClass) attackClasses.add(manifest.attackClass);
     for (const tag of manifest.tags ?? []) tags.add(tag);
+    if (manifest.targetSurface) targetSurfaces.add(manifest.targetSurface);
     for (const link of manifest.sourceLinks ?? []) sourceLinks.add(link);
   }
 
@@ -520,8 +565,11 @@ async function collectEvalStoreSnapshot(options: EvalStoreSnapshotOptions): Prom
         total: benchmarkFiles.length,
         valid: manifests.length,
         invalid: invalidBenchmarks.length,
+        redTeam,
         totalCases,
+        attackClasses: [...attackClasses].sort(),
         tags: [...tags].sort(),
+        targetSurfaces: [...targetSurfaces].sort(),
         sourceLinks: [...sourceLinks].sort(),
       },
       runs: {
@@ -582,7 +630,10 @@ export async function validateEvalBenchmarkPack(sourcePath: string): Promise<Eva
     sourcePath: trimmedSourcePath,
     manifestPath,
     benchmarkId: assertSafeBenchmarkId(manifest.benchmarkId),
+    benchmarkType: manifest.benchmarkType ?? "standard",
     title: manifest.title,
+    attackClass: manifest.attackClass,
+    targetSurface: manifest.targetSurface,
     totalCases: manifest.cases.length,
     tags: [...(manifest.tags ?? [])],
     sourceLinks: [...(manifest.sourceLinks ?? [])],

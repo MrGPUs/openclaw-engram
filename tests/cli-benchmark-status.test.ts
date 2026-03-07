@@ -127,7 +127,10 @@ test("benchmark-status summarizes valid manifests, invalid manifests, and latest
   assert.equal(status.benchmarks.total, 2);
   assert.equal(status.benchmarks.valid, 1);
   assert.equal(status.benchmarks.invalid, 1);
+  assert.equal(status.benchmarks.redTeam, 0);
   assert.equal(status.benchmarks.totalCases, 2);
+  assert.deepEqual(status.benchmarks.attackClasses, []);
+  assert.deepEqual(status.benchmarks.targetSurfaces, []);
   assert.deepEqual(status.benchmarks.tags, ["objective-state", "trajectory"]);
   assert.equal(status.runs.total, 2);
   assert.equal(status.runs.invalid, 1);
