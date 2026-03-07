@@ -244,7 +244,7 @@ function parseFrontmatter(
     if (reasonsMatch) {
       reasons = reasonsMatch[1]
         .split(/",\s*"/)
-        .map((r) => r.replace(/^"|"$/g, "").replace(/\\"/g, '"'))
+        .map((r) => r.replace(/^"|"$/g, "").replace(/\\\\/g, "\\").replace(/\\"/g, '"'))
         .filter(Boolean);
     }
 
@@ -314,14 +314,16 @@ function parseFrontmatter(
   if (fmBlock.includes("links:")) {
     const links: MemoryLink[] = [];
     const linkMatches = fmBlock.matchAll(
-      /- targetId: (\S+)\s+linkType: (\S+)\s+strength: ([\d.]+)(?:\s+reason: "([^"]*)")?/g,
+      /- targetId: (\S+)\s+linkType: (\S+)\s+strength: ([\d.]+)(?:\s+reason: "((?:\\.|[^"\\])*)")?/g,
     );
     for (const match of linkMatches) {
       links.push({
         targetId: match[1],
         linkType: match[2] as MemoryLink["linkType"],
         strength: parseFloat(match[3]),
-        reason: match[4] || undefined,
+        reason: match[4]
+          ? match[4].replace(/\\\\/g, "\\").replace(/\\"/g, '"')
+          : undefined,
       });
     }
     if (links.length > 0) {
