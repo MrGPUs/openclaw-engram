@@ -257,6 +257,7 @@ export async function searchCausalTrajectories(options: {
   if (trajectories.length === 0) return [];
 
   const queryTokens = new Set(normalizeTokens(options.query));
+  if (queryTokens.size === 0) return [];
   const scored = trajectories.map((record) => {
     const lexical = lexicalScoreCausalTrajectoryRecord(record, queryTokens);
     return {
@@ -267,9 +268,7 @@ export async function searchCausalTrajectories(options: {
     };
   });
 
-  const filtered = queryTokens.size === 0
-    ? scored
-    : scored.filter((result) => result.lexicalScore > 0);
+  const filtered = scored.filter((result) => result.lexicalScore > 0);
 
   filtered.sort((left, right) => {
     if (right.score !== left.score) return right.score - left.score;

@@ -95,6 +95,20 @@ test("searchCausalTrajectories ranks prompt-relevant chains and explains the mat
   assert.match(results[0]?.matchedFields.join(",") ?? "", /goal|action|observation|outcome/i);
 });
 
+test("searchCausalTrajectories returns no matches when query normalization strips all tokens", async () => {
+  const memoryDir = await mkdtemp(path.join(os.tmpdir(), "engram-causal-trajectory-stopwords-"));
+  await seedCausalTrajectoryStore(memoryDir);
+
+  const results = await searchCausalTrajectories({
+    memoryDir,
+    query: "why did it go?",
+    maxResults: 3,
+    sessionKey: "agent:main",
+  });
+
+  assert.deepEqual(results, []);
+});
+
 test("recall injects causal trajectory section when retrieval is enabled", async () => {
   const orchestrator = await buildCausalTrajectoryRecallHarness({
     causalTrajectoryRecallEnabled: true,
