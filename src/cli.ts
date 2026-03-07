@@ -618,8 +618,6 @@ export async function runBenchmarkCiGateCliCommand(options: {
   candidateEvalStoreDir: string;
 }): Promise<EvalCiGateReport> {
   return runEvalBenchmarkCiGate({
-    baseMemoryDir: options.baseEvalStoreDir,
-    candidateMemoryDir: options.candidateEvalStoreDir,
     baseEvalStoreDir: options.baseEvalStoreDir,
     candidateEvalStoreDir: options.candidateEvalStoreDir,
   });

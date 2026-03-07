@@ -419,6 +419,12 @@ interface EvalStoreSnapshot {
   shadows: EvalShadowRecallRecord[];
 }
 
+interface EvalStoreSnapshotOptions {
+  rootDir: string;
+  enabled: boolean;
+  shadowModeEnabled: boolean;
+}
+
 const LOWER_IS_BETTER_METRICS = new Set<keyof EvalRunMetrics>(["trustViolationRate"]);
 
 function computePassRate(run: EvalRunSummary): number {
@@ -477,13 +483,8 @@ function compareMetricDeltas(
   return { deltas, regressions, improvements };
 }
 
-async function collectEvalStoreSnapshot(options: {
-  memoryDir: string;
-  evalStoreDir?: string;
-  enabled: boolean;
-  shadowModeEnabled: boolean;
-}): Promise<EvalStoreSnapshot> {
-  const rootDir = resolveEvalStoreDir(options.memoryDir, options.evalStoreDir);
+async function collectEvalStoreSnapshot(options: EvalStoreSnapshotOptions): Promise<EvalStoreSnapshot> {
+  const rootDir = options.rootDir;
   const benchmarkDir = path.join(rootDir, "benchmarks");
   const runsDir = path.join(rootDir, "runs");
   const shadowDir = path.join(rootDir, "shadow");
@@ -689,24 +690,46 @@ export async function getEvalHarnessStatus(options: {
   enabled: boolean;
   shadowModeEnabled: boolean;
 }): Promise<EvalHarnessStatus> {
-  return (await collectEvalStoreSnapshot(options)).status;
+  return (
+    await collectEvalStoreSnapshot({
+      rootDir: resolveEvalStoreDir(options.memoryDir, options.evalStoreDir),
+      enabled: options.enabled,
+      shadowModeEnabled: options.shadowModeEnabled,
+    })
+  ).status;
+}
+
+function resolveRequiredEvalStoreRoot(options: { memoryDir?: string; evalStoreDir?: string }, label: string): string {
+  if (typeof options.evalStoreDir === "string" && options.evalStoreDir.trim().length > 0) {
+    return options.evalStoreDir.trim();
+  }
+  if (typeof options.memoryDir === "string" && options.memoryDir.trim().length > 0) {
+    return resolveEvalStoreDir(options.memoryDir.trim());
+  }
+  throw new Error(`${label} requires memoryDir or evalStoreDir`);
 }
 
 export async function runEvalBenchmarkCiGate(options: {
-  baseMemoryDir: string;
-  candidateMemoryDir: string;
+  baseMemoryDir?: string;
+  candidateMemoryDir?: string;
   baseEvalStoreDir?: string;
   candidateEvalStoreDir?: string;
 }): Promise<EvalCiGateReport> {
+  const baseRootDir = resolveRequiredEvalStoreRoot(
+    { memoryDir: options.baseMemoryDir, evalStoreDir: options.baseEvalStoreDir },
+    "base",
+  );
+  const candidateRootDir = resolveRequiredEvalStoreRoot(
+    { memoryDir: options.candidateMemoryDir, evalStoreDir: options.candidateEvalStoreDir },
+    "candidate",
+  );
   const baseSnapshot = await collectEvalStoreSnapshot({
-    memoryDir: options.baseMemoryDir,
-    evalStoreDir: options.baseEvalStoreDir,
+    rootDir: baseRootDir,
     enabled: true,
     shadowModeEnabled: true,
   });
   const candidateSnapshot = await collectEvalStoreSnapshot({
-    memoryDir: options.candidateMemoryDir,
-    evalStoreDir: options.candidateEvalStoreDir,
+    rootDir: candidateRootDir,
     enabled: true,
     shadowModeEnabled: true,
   });

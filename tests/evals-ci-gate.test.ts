@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { runBenchmarkCiGateCliCommand } from "../src/cli.js";
+import { runEvalBenchmarkCiGate } from "../src/evals.js";
 
 async function writeBenchmarkStore(options: {
   rootDir: string;
@@ -165,4 +166,32 @@ test("benchmark CI gate fails on invalid candidate eval artifacts", async () => 
   assert.equal(report.passed, false);
   assert.equal(report.invalidArtifacts.candidate.shadows, 1);
   assert.match(report.regressions.join("\n"), /candidate store has 1 invalid shadow record/);
+});
+
+test("benchmark CI gate accepts explicit eval store dirs without memory dirs", async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), "engram-eval-ci-store-only-"));
+  const baseDir = path.join(tempRoot, "base-store");
+  const candidateDir = path.join(tempRoot, "candidate-store");
+
+  await writeBenchmarkStore({
+    rootDir: baseDir,
+    benchmarkId: "ama-memory",
+    passRate: { passed: 8, failed: 2, total: 10 },
+    actionOutcomeScore: 0.8,
+  });
+  await writeBenchmarkStore({
+    rootDir: candidateDir,
+    benchmarkId: "ama-memory",
+    passRate: { passed: 9, failed: 1, total: 10 },
+    actionOutcomeScore: 0.9,
+  });
+
+  const report = await runEvalBenchmarkCiGate({
+    baseEvalStoreDir: baseDir,
+    candidateEvalStoreDir: candidateDir,
+  });
+
+  assert.equal(report.passed, true);
+  assert.equal(report.baseRootDir, baseDir);
+  assert.equal(report.candidateRootDir, candidateDir);
 });
