@@ -12,6 +12,7 @@ test("benchmark-status reports empty eval store safely", async () => {
     memoryDir,
     evalHarnessEnabled: false,
     evalShadowModeEnabled: false,
+    memoryRedTeamBenchEnabled: false,
   });
 
   assert.equal(status.enabled, false);
@@ -120,6 +121,7 @@ test("benchmark-status summarizes valid manifests, invalid manifests, and latest
     memoryDir,
     evalHarnessEnabled: true,
     evalShadowModeEnabled: true,
+    memoryRedTeamBenchEnabled: false,
   });
 
   assert.equal(status.enabled, true);

@@ -213,7 +213,10 @@ function assertSafeBenchmarkId(benchmarkId: string): string {
   return benchmarkId;
 }
 
-export function validateEvalBenchmarkManifest(raw: unknown): EvalBenchmarkManifest {
+export function validateEvalBenchmarkManifest(
+  raw: unknown,
+  options?: { memoryRedTeamBenchEnabled?: boolean },
+): EvalBenchmarkManifest {
   if (!isRecord(raw)) throw new Error("benchmark manifest must be an object");
   if (raw.schemaVersion !== 1) throw new Error("schemaVersion must be 1");
   if (!Array.isArray(raw.cases)) throw new Error("cases must be an array");
@@ -236,6 +239,9 @@ export function validateEvalBenchmarkManifest(raw: unknown): EvalBenchmarkManife
   });
 
   const benchmarkType = benchmarkTypeRaw as EvalBenchmarkType;
+  if (benchmarkType === "memory-red-team" && options?.memoryRedTeamBenchEnabled !== true) {
+    throw new Error("memory-red-team benchmark packs require memoryRedTeamBenchEnabled");
+  }
   const attackClass =
     typeof raw.attackClass === "string" && raw.attackClass.trim().length > 0
       ? raw.attackClass.trim()
@@ -421,6 +427,7 @@ interface EvalStoreSnapshotOptions {
   rootDir: string;
   enabled: boolean;
   shadowModeEnabled: boolean;
+  memoryRedTeamBenchEnabled?: boolean;
 }
 
 const LOWER_IS_BETTER_METRICS = new Set<keyof EvalRunMetrics>(["trustViolationRate"]);
@@ -497,7 +504,11 @@ async function collectEvalStoreSnapshot(options: EvalStoreSnapshotOptions): Prom
 
   for (const filePath of benchmarkFiles) {
     try {
-      manifests.push(validateEvalBenchmarkManifest(await readJsonFile(filePath)));
+      manifests.push(
+        validateEvalBenchmarkManifest(await readJsonFile(filePath), {
+          memoryRedTeamBenchEnabled: options.memoryRedTeamBenchEnabled,
+        }),
+      );
     } catch (error) {
       invalidBenchmarks.push({
         path: filePath,
@@ -619,13 +630,18 @@ async function resolveBenchmarkManifestPath(sourcePath: string): Promise<{ sourc
   throw new Error("benchmark pack source must be a file or directory");
 }
 
-export async function validateEvalBenchmarkPack(sourcePath: string): Promise<EvalBenchmarkPackSummary> {
+export async function validateEvalBenchmarkPack(
+  sourcePath: string,
+  options?: { memoryRedTeamBenchEnabled?: boolean },
+): Promise<EvalBenchmarkPackSummary> {
   const trimmedSourcePath = sourcePath.trim();
   if (trimmedSourcePath.length === 0) {
     throw new Error("benchmark pack path must be a non-empty string");
   }
   const { manifestPath } = await resolveBenchmarkManifestPath(trimmedSourcePath);
-  const manifest = validateEvalBenchmarkManifest(await readJsonFile(manifestPath));
+  const manifest = validateEvalBenchmarkManifest(await readJsonFile(manifestPath), {
+    memoryRedTeamBenchEnabled: options?.memoryRedTeamBenchEnabled,
+  });
   return {
     sourcePath: trimmedSourcePath,
     manifestPath,
@@ -645,8 +661,11 @@ export async function importEvalBenchmarkPack(options: {
   memoryDir: string;
   evalStoreDir?: string;
   force?: boolean;
+  memoryRedTeamBenchEnabled?: boolean;
 }): Promise<EvalBenchmarkPackSummary & { targetDir: string; overwritten: boolean }> {
-  const summary = await validateEvalBenchmarkPack(options.sourcePath);
+  const summary = await validateEvalBenchmarkPack(options.sourcePath, {
+    memoryRedTeamBenchEnabled: options.memoryRedTeamBenchEnabled,
+  });
   const rootDir = resolveEvalStoreDir(options.memoryDir, options.evalStoreDir);
   const benchmarkDir = path.join(rootDir, "benchmarks");
   const targetDir = path.join(benchmarkDir, summary.benchmarkId);
@@ -701,12 +720,14 @@ export async function getEvalHarnessStatus(options: {
   evalStoreDir?: string;
   enabled: boolean;
   shadowModeEnabled: boolean;
+  memoryRedTeamBenchEnabled?: boolean;
 }): Promise<EvalHarnessStatus> {
   return (
     await collectEvalStoreSnapshot({
       rootDir: resolveEvalStoreDir(options.memoryDir, options.evalStoreDir),
       enabled: options.enabled,
       shadowModeEnabled: options.shadowModeEnabled,
+      memoryRedTeamBenchEnabled: options.memoryRedTeamBenchEnabled,
     })
   ).status;
 }
@@ -739,11 +760,13 @@ export async function runEvalBenchmarkCiGate(options: {
     rootDir: baseRootDir,
     enabled: true,
     shadowModeEnabled: true,
+    memoryRedTeamBenchEnabled: true,
   });
   const candidateSnapshot = await collectEvalStoreSnapshot({
     rootDir: candidateRootDir,
     enabled: true,
     shadowModeEnabled: true,
+    memoryRedTeamBenchEnabled: true,
   });
 
   const regressions: string[] = [];

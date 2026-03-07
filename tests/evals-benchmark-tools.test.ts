@@ -42,7 +42,7 @@ test("benchmark-validate accepts a manifest JSON file", async () => {
   const manifestPath = path.join(tmpDir, "ama-memory.json");
   await writeManifest(manifestPath);
 
-  const summary = await runBenchmarkValidateCliCommand({ path: manifestPath });
+  const summary = await runBenchmarkValidateCliCommand({ path: manifestPath, memoryRedTeamBenchEnabled: false });
 
   assert.equal(summary.manifestPath, manifestPath);
   assert.equal(summary.benchmarkId, "ama-memory");
@@ -56,7 +56,7 @@ test("benchmark-validate accepts a directory pack with root manifest.json", asyn
   await mkdir(packDir, { recursive: true });
   await writeManifest(path.join(packDir, "manifest.json"));
 
-  const summary = await runBenchmarkValidateCliCommand({ path: packDir });
+  const summary = await runBenchmarkValidateCliCommand({ path: packDir, memoryRedTeamBenchEnabled: false });
 
   assert.equal(summary.sourcePath, packDir);
   assert.equal(summary.manifestPath, path.join(packDir, "manifest.json"));
@@ -74,7 +74,7 @@ test("benchmark-validate accepts a memory red-team benchmark pack with attack me
     sourceLinks: ["https://arxiv.org/abs/2602.16901"],
   });
 
-  const summary = await runBenchmarkValidateCliCommand({ path: manifestPath });
+  const summary = await runBenchmarkValidateCliCommand({ path: manifestPath, memoryRedTeamBenchEnabled: true });
 
   assert.equal(summary.benchmarkType, "memory-red-team");
   assert.equal(summary.attackClass, "provenance-spoofing");
@@ -89,8 +89,23 @@ test("benchmark-validate rejects memory red-team packs without attack metadata",
   });
 
   await assert.rejects(
-    () => runBenchmarkValidateCliCommand({ path: manifestPath }),
+    () => runBenchmarkValidateCliCommand({ path: manifestPath, memoryRedTeamBenchEnabled: true }),
     /attackClass must be a non-empty string/i,
+  );
+});
+
+test("benchmark-validate rejects memory red-team packs when the feature flag is off", async () => {
+  const tmpDir = await mkdtemp(path.join(os.tmpdir(), "engram-bench-validate-red-team-flag-off-"));
+  const manifestPath = path.join(tmpDir, "memory-red-team.json");
+  await writeManifest(manifestPath, "poisoning-corroboration-pack", {
+    benchmarkType: "memory-red-team",
+    attackClass: "provenance-spoofing",
+    targetSurface: "trust-zone-promotion",
+  });
+
+  await assert.rejects(
+    () => runBenchmarkValidateCliCommand({ path: manifestPath, memoryRedTeamBenchEnabled: false }),
+    /memory-red-team benchmark packs require memoryRedTeamBenchEnabled/i,
   );
 });
 
@@ -102,6 +117,7 @@ test("benchmark-import copies a manifest file into the eval benchmark store", as
   const result = await runBenchmarkImportCliCommand({
     path: manifestPath,
     memoryDir: tmpDir,
+    memoryRedTeamBenchEnabled: false,
   });
 
   const importedManifest = JSON.parse(await readFile(path.join(result.targetDir, "manifest.json"), "utf8")) as {
@@ -124,6 +140,7 @@ test("benchmark-import preserves extra files when importing a directory pack", a
   const result = await runBenchmarkImportCliCommand({
     path: packDir,
     memoryDir: tmpDir,
+    memoryRedTeamBenchEnabled: false,
   });
 
   const fixture = await readFile(path.join(result.targetDir, "fixtures", "notes.md"), "utf8");
@@ -131,6 +148,7 @@ test("benchmark-import preserves extra files when importing a directory pack", a
     memoryDir: tmpDir,
     evalHarnessEnabled: true,
     evalShadowModeEnabled: false,
+    memoryRedTeamBenchEnabled: false,
   });
 
   assert.equal(fixture, "# notes\n");
@@ -152,12 +170,14 @@ test("benchmark-status accounts for imported memory red-team benchmark packs", a
   await runBenchmarkImportCliCommand({
     path: redTeamManifestPath,
     memoryDir: tmpDir,
+    memoryRedTeamBenchEnabled: true,
   });
 
   const status = await runBenchmarkStatusCliCommand({
     memoryDir: tmpDir,
     evalHarnessEnabled: true,
     evalShadowModeEnabled: false,
+    memoryRedTeamBenchEnabled: true,
   });
 
   assert.equal(status.benchmarks.redTeam, 1);
@@ -173,6 +193,7 @@ test("benchmark-import rejects overwrite without force", async () => {
   await runBenchmarkImportCliCommand({
     path: manifestPath,
     memoryDir: tmpDir,
+    memoryRedTeamBenchEnabled: false,
   });
 
   await assert.rejects(
@@ -180,6 +201,7 @@ test("benchmark-import rejects overwrite without force", async () => {
       runBenchmarkImportCliCommand({
         path: manifestPath,
         memoryDir: tmpDir,
+        memoryRedTeamBenchEnabled: false,
       }),
     /rerun with force/i,
   );
@@ -193,6 +215,7 @@ test("benchmark-import allows overwrite with force", async () => {
   await runBenchmarkImportCliCommand({
     path: manifestPath,
     memoryDir: tmpDir,
+    memoryRedTeamBenchEnabled: false,
   });
 
   await writeManifest(manifestPath, "ama-memory");
@@ -200,6 +223,7 @@ test("benchmark-import allows overwrite with force", async () => {
     path: manifestPath,
     memoryDir: tmpDir,
     force: true,
+    memoryRedTeamBenchEnabled: false,
   });
 
   assert.equal(result.overwritten, true);
