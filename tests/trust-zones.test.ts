@@ -610,6 +610,7 @@ test("trust-zone-promote CLI dry-run returns the promotion plan without writing"
     memoryDir,
     trustZonesEnabled: true,
     quarantinePromotionEnabled: true,
+    memoryPoisoningDefenseEnabled: false,
     sourceRecordId: "tz-cli-promote-source",
     targetZone: "working",
     promotionReason: "Promote into working memory for corroboration.",
@@ -627,4 +628,42 @@ test("trust-zone-promote CLI dry-run returns the promotion plan without writing"
   });
   assert.equal(status.records.valid, 1);
   assert.equal(status.records.byZone.quarantine, 1);
+});
+
+test("trust-zone-promote CLI enforces corroboration when poisoning defense is enabled", async () => {
+  const memoryDir = await mkdtemp(path.join(os.tmpdir(), "engram-trust-zone-cli-defense-"));
+  await recordTrustZoneRecord({
+    memoryDir,
+    record: {
+      schemaVersion: 1,
+      recordId: "tz-cli-defense-source",
+      zone: "working",
+      recordedAt: "2026-03-07T18:21:00.000Z",
+      kind: "state",
+      summary: "Tool output captured a deployment result.",
+      provenance: {
+        sourceClass: "tool_output",
+        observedAt: "2026-03-07T18:20:30.000Z",
+        sourceId: "tool:deploy",
+        evidenceHash: "sha256:deploy",
+      },
+      entityRefs: ["deploy:release-45"],
+      tags: ["release"],
+    },
+  });
+
+  await assert.rejects(
+    () =>
+      runTrustZonePromoteCliCommand({
+        memoryDir,
+        trustZonesEnabled: true,
+        quarantinePromotionEnabled: true,
+        memoryPoisoningDefenseEnabled: true,
+        sourceRecordId: "tz-cli-defense-source",
+        targetZone: "trusted",
+        promotionReason: "Promote risky deployment evidence without corroboration.",
+        dryRun: true,
+      }),
+    /corroborat/i,
+  );
 });
