@@ -367,7 +367,7 @@ See [advanced-retrieval.md](advanced-retrieval.md) for guidance.
 | `evalShadowModeEnabled` | `false` | Record live recall decisions to the eval store without changing injected output |
 | `evalStoreDir` | `{memoryDir}/state/evals` | Root directory for benchmark packs, run summaries, and shadow recall records |
 | `objectiveStateMemoryEnabled` | `false` | Enable the objective-state memory foundation for normalized world/tool state snapshots |
-| `objectiveStateSnapshotWritesEnabled` | `false` | Allow writers to persist objective-state snapshots into the store |
+| `objectiveStateSnapshotWritesEnabled` | `false` | Allow agent-end file/process/tool writers to persist objective-state snapshots into the store |
 | `objectiveStateStoreDir` | `{memoryDir}/state/objective-state` | Root directory for objective-state snapshot artifacts |
 
 Current foundation slice:

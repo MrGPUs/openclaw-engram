@@ -31,6 +31,7 @@ AI agents forget everything between conversations. Engram fixes that.
 - **Pluggable search** — Choose from six search backends: QMD (hybrid BM25+vector+reranking), LanceDB, Meilisearch, Orama, remote HTTP, or bring your own.
 - **Memory OS features** — Graph recall, temporal memory tree, lifecycle policy, compounding, shared context, memory boxes, and identity continuity can be enabled progressively as your install grows.
 - **Benchmark-first roadmap** — Engram now has an evaluation harness with live shadow recall recording and a CI benchmark delta gate, so memory improvements can be measured and regression-checked instead of argued from anecdotes.
+- **Objective-state foundation** — When `objectiveStateMemoryEnabled` and `objectiveStateSnapshotWritesEnabled` are enabled together, Engram records normalized file, process, and tool outcomes from `agent_end` tool activity into a dedicated objective-state store.
 - **Zero-config start** — Install, add an API key, restart. Engram works out of the box with sensible defaults and progressively unlocks advanced features as you enable them.
 
 ## Quick Start
