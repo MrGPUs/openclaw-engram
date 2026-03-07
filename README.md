@@ -32,7 +32,7 @@ AI agents forget everything between conversations. Engram fixes that.
 - **Memory OS features** — Graph recall, temporal memory tree, lifecycle policy, compounding, shared context, memory boxes, and identity continuity can be enabled progressively as your install grows.
 - **Benchmark-first roadmap** — Engram now has an evaluation harness with live shadow recall recording and a CI benchmark delta gate, so memory improvements can be measured and regression-checked instead of argued from anecdotes.
 - **Objective-state recall** — Engram can now store normalized file, process, and tool outcomes and, when `objectiveStateRecallEnabled` is enabled, inject the most relevant objective-state snapshots back into recall context as a separate `Objective State` section.
-- **Causal trajectory store** — Engram can now persist typed `goal -> action -> observation -> outcome -> follow-up` chains when `causalTrajectoryMemoryEnabled` is enabled, creating the storage foundation for later action-conditioned graph and recall work.
+- **Causal trajectory graph foundation** — Engram can now persist typed `goal -> action -> observation -> outcome -> follow-up` chains when `causalTrajectoryMemoryEnabled` is enabled and, with `actionGraphRecallEnabled`, emit deterministic action-conditioned edges into the causal graph for later trajectory-aware retrieval.
 - **Zero-config start** — Install, add an API key, restart. Engram works out of the box with sensible defaults and progressively unlocks advanced features as you enable them.
 
 ## Quick Start
@@ -186,6 +186,7 @@ Key settings:
 | `objectiveStateStoreDir` | `{memoryDir}/state/objective-state` | Root directory for objective-state snapshots |
 | `causalTrajectoryMemoryEnabled` | `false` | Enable the causal-trajectory memory foundation for typed causal chains |
 | `causalTrajectoryStoreDir` | `{memoryDir}/state/causal-trajectories` | Root directory for causal-trajectory records |
+| `actionGraphRecallEnabled` | `false` | Write action-conditioned causal-stage edges from typed trajectory records into the causal graph |
 
 Full reference: [Config Reference](docs/config-reference.md)
 

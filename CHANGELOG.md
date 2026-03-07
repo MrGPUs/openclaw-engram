@@ -828,3 +828,4 @@ All notable changes to this project will be documented in this file.
 
 - add PR5 objective-state memory foundation: typed snapshot schema/store, status CLI, feature flags, and docs/tests
 - add PR7 objective-state recall: bounded snapshot search, recall injection flag, objective-state recall section, and docs/tests
+- Added the PR9 foundation for action-conditioned causal graph construction, including deterministic causal-stage graph edges derived from typed trajectory records behind `actionGraphRecallEnabled`.

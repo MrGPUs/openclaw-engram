@@ -2,37 +2,34 @@
 
 ## Problem
 
-PR7 closed the first objective-state loop: Engram can now recall prompt-relevant
-world-state snapshots as a separate section. That improves access to what
-actually happened, but it still does not capture why a sequence of actions led
-to an outcome. Objective-state snapshots are atomic. Agentic memory needs the
-next layer above them: typed causal chains that preserve goal, action,
-observation, outcome, and intended follow-up.
+PR8 closed the causal-trajectory storage loop: Engram can now persist typed
+goal-action-observation-outcome-follow-up records as first-class artifacts. That
+solves the storage problem, but those records are still isolated JSON files. The
+next problem is graph continuity. If trajectories remain disconnected from the
+graph substrate, PR10 would still have to infer traversal structure from raw
+records at query time.
 
-The current problem is therefore not retrieval breadth. It is structural memory
-shape. Without a causal-trajectory store, later graph and retrieval work would
-have to infer trajectory records from raw snapshots or transcripts after the
-fact, which is noisy and hard to benchmark.
+The current problem is therefore not retrieval breadth. It is causal graph
+shape. Engram needs a deterministic bridge from trajectory records into graph
+edges so later retrieval and explanation layers can expand over a stable
+action-conditioned structure instead of re-deriving it from transcripts.
 
 ## Operating Theory
 
-Causal-memory work should begin the same way objective-state memory did: store
-first, use later. A typed on-disk store is the right first move because it
-creates a stable contract for later writers, graph builders, and retrievers
-without forcing premature ranking logic into the live recall path.
+The rollout pattern still holds: store first, then graph construction, then
+retrieval. PR9 is the graph-construction bridge. The right move is not to add
+ranking heuristics yet, but to translate each typed trajectory into a
+deterministic set of synthetic causal-stage nodes:
 
-The contract for this slice is a normalized causal record:
+- `goal`
+- `action`
+- `observation`
+- `outcome`
+- optional `follow_up`
 
-- goal
-- action summary
-- observation summary
-- outcome kind and outcome summary
-- optional follow-up summary
-- optional refs back to objective-state snapshots and entities
-
-That record is intentionally narrower than a full action graph. The point is to
-preserve causal structure with minimal interpretation so later slices can build
-action-conditioned edges and retrieval on top of a durable source of truth.
+Those nodes can then be connected by stable `causal` edges inside the existing
+graph JSONL store. This keeps the graph layer additive and backwards-compatible
+while giving PR10 something real to traverse.
 
 ## Strategy
 
@@ -57,21 +54,20 @@ This keeps the larger thesis intact:
 
 ## Key Discoveries
 
-- Objective-state recall made it clearer that snapshots and trajectories solve
-  different problems. Snapshots answer "what changed"; trajectories answer
-  "what chain of intent and consequence produced this state."
-- Starting with a store-only slice is the safest way to add causal structure.
-  It avoids inventing retrieval heuristics before the storage contract is
-  stable.
-- Causal-memory records should link back to objective-state snapshot IDs rather
-  than duplicate snapshot payloads. The trajectory layer should compose the
-  existing state layer, not fork it.
+- Objective-state snapshots and causal trajectories are complementary, but they
+  do not need to share the same node model yet. PR9 can ship synthetic
+  trajectory-stage nodes first and leave richer cross-linking for later slices.
+- Deterministic synthetic node IDs are enough for the first graph bridge. The
+  important property is stable traversal structure, not perfect ontology on the
+  first pass.
+- Wiring graph construction into `recordCausalTrajectory(...)` keeps the write
+  path simple and measurable while leaving retrieval behavior unchanged.
 
 ## Open Questions
 
-- Which live hook should become the first causal-trajectory writer in PR9
-  without overfitting to one provider or one transcript shape?
-- How much of the causal chain should be extracted heuristically versus written
-  directly from structured runtime events?
-- Which benchmark cases best expose trajectory-quality regressions once
-  trajectory-aware retrieval lands?
+- Should later slices link trajectory-stage nodes directly to objective-state
+  snapshot nodes, entity graph nodes, or both?
+- Which traversal/ranking heuristics best surface useful trajectory evidence
+  once PR10 begins retrieval work?
+- Which benchmark cases best expose regressions in trajectory usefulness versus
+  simply graph coverage?

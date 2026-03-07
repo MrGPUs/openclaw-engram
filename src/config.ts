@@ -496,6 +496,7 @@ export function parseConfig(raw: unknown): PluginConfig {
       typeof cfg.causalTrajectoryStoreDir === "string" && cfg.causalTrajectoryStoreDir.trim().length > 0
         ? cfg.causalTrajectoryStoreDir.trim()
         : path.join(memoryDir, "state", "causal-trajectories"),
+    actionGraphRecallEnabled: cfg.actionGraphRecallEnabled === true,
     // Local LLM Provider (v2.1)
     localLlmEnabled: cfg.localLlmEnabled === true || cfg.localLlmEnabled === "true", // default: false
     localLlmUrl:
