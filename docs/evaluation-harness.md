@@ -17,7 +17,6 @@ This slice ships:
 
 - `evalHarnessEnabled`
 - `evalShadowModeEnabled`
-- `evalCiGateEnabled`
 - `evalStoreDir`
 - `openclaw engram benchmark-status`
 - `openclaw engram benchmark-validate <path>`
@@ -181,7 +180,6 @@ The CI gate:
 
 - Keep `evalHarnessEnabled: false` by default in production until you want benchmark bookkeeping on disk.
 - Turn on `evalShadowModeEnabled` when you want to start recording live recall decisions for measurement without changing recall output.
-- Use `evalCiGateEnabled` to expose the config surface for CI benchmark-delta workflows; the CLI gate can be run even when runtime flags stay off.
 - Treat benchmark packs as versioned operator assets. PRs that change them should explain why the benchmark changed.
 
 ## Next Steps

@@ -365,7 +365,6 @@ See [advanced-retrieval.md](advanced-retrieval.md) for guidance.
 |---------|---------|-------------|
 | `evalHarnessEnabled` | `false` | Enable Engram's benchmark/evaluation harness bookkeeping |
 | `evalShadowModeEnabled` | `false` | Record live recall decisions to the eval store without changing injected output |
-| `evalCiGateEnabled` | `false` | Expose benchmark delta gating config for CI comparison workflows |
 | `evalStoreDir` | `{memoryDir}/state/evals` | Root directory for benchmark packs, run summaries, and shadow recall records |
 
 Current foundation slice:

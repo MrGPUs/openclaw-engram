@@ -174,7 +174,6 @@ Key settings:
 | `memoryDir` | `~/.openclaw/workspace/memory/local` | Memory storage root |
 | `evalHarnessEnabled` | `false` | Enable the evaluation harness for benchmark packs, run summaries, and shadow recall bookkeeping |
 | `evalShadowModeEnabled` | `false` | Record live recall decisions to the eval store without changing injected output |
-| `evalCiGateEnabled` | `false` | Expose the benchmark delta gating config surface for CI comparisons |
 | `evalStoreDir` | `{memoryDir}/state/evals` | Root directory for benchmark packs, run summaries, and shadow recall records |
 
 Full reference: [Config Reference](docs/config-reference.md)

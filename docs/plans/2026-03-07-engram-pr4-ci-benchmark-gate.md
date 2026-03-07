@@ -2,7 +2,7 @@
 
 **Status:** planned  
 **Roadmap track:** 1. AMA-Bench-style evaluation harness  
-**Flags:** `evalHarnessEnabled`, `evalShadowModeEnabled`, `evalCiGateEnabled`
+**Flags:** none for the CI gate itself; it compares eval-store artifacts out of band.
 
 ## Goal
 
