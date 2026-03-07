@@ -1174,7 +1174,7 @@
       "harmonicRetrievalEnabled": {
         "type": "boolean",
         "default": false,
-        "description": "Enable the harmonic-retrieval foundation for abstraction-node storage and later abstraction-plus-anchor recall slices."
+        "description": "Enable harmonic retrieval blending over abstraction nodes and cue anchors, including recall-section injection and harmonic-search diagnostics."
       },
       "abstractionAnchorsEnabled": {
         "type": "boolean",
@@ -2171,7 +2171,7 @@
     },
     "harmonicRetrievalEnabled": {
       "label": "Harmonic Retrieval",
-      "help": "Enable the harmonic-retrieval foundation for abstraction-node storage and later abstraction-plus-anchor recall slices."
+      "help": "Enable harmonic retrieval blending over abstraction nodes and cue anchors, including recall-section injection and harmonic-search diagnostics."
     },
     "abstractionAnchorsEnabled": {
       "label": "Abstraction Anchors",

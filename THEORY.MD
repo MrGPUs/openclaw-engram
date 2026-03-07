@@ -1,68 +1,72 @@
-# Theory: Cue Anchors Need Their Own Index Before Harmonic Blending Lands
+# Theory: Harmonic Retrieval Should Surface Its Blend Before It Tries To Hide It
 
 ## Problem
 
-Engram now has a measured evaluation harness, objective-state memory, causal
-trajectories, trust zones, provenance scoring, corroboration rules, and typed
-red-team benchmark packs. The next roadmap step is still harmonic retrieval,
-but PR18 should not jump from abstraction nodes straight into blended ranking.
-The missing substrate is a cue-anchor index that makes abstraction nodes
-addressable by concrete cues before any scoring logic is allowed to use them.
+Engram now has the two substrates harmonic retrieval needs:
 
-If cue-anchor indexing and harmonic blending land together, every retrieval
-regression becomes ambiguous: did the failure come from bad anchor typing, bad
-node linkage, or bad blending weights? The system needs a durable anchor index
-before it needs retrieval heuristics.
+- abstraction nodes
+- cue-anchor indexes
+
+The next mistake would be to jump straight into opaque ranking behavior that
+quietly mixes those signals into generic recall. That would make review harder,
+not easier. If the blend is invisible, reviewers cannot tell whether a result
+won because of abstraction compression, concrete cue matches, or an accidental
+weighting bug.
+
+PR19 needs to make the blend explicit before it becomes subtle.
 
 ## Operating Theory
 
-The memory-OS rollout keeps working when each retrieval family is decomposed
-into store, writer, retrieval, and policy slices. Harmonic retrieval should
-keep following that pattern:
+The rollout pattern that has worked across the memory-OS track is:
 
-1. define abstraction-node storage
-2. add cue-anchor indexing
-3. blend abstractions and anchors into retrieval
-4. benchmark whether the blend actually improves recall utility
+1. define storage
+2. define writers or indexes
+3. expose a bounded retrieval surface
+4. benchmark before deeper automation
 
-PR18 is step 2. It should do one thing: make cue anchors first-class, typed,
-and inspectable.
+For harmonic retrieval, that means:
 
-That keeps later retrieval work explainable. Reviewers can inspect whether
-anchors are well-formed and linked to the right abstraction nodes before
-debating how much weight they should have against semantic recall or episodic
-traces.
+1. PR17: abstraction-node storage
+2. PR18: cue-anchor indexing
+3. PR19: bounded harmonic retrieval section plus diagnostics
+
+The harmonic blend should not be hidden inside `## Relevant Memories` yet.
+It should ship as its own legible section so operators can inspect exactly what
+the abstraction layer is contributing.
 
 ## Strategy
 
-Keep the cue-anchor contract narrow and deterministic:
+Keep PR19 narrow and explainable:
 
-- reuse the existing roadmap flags: `harmonicRetrievalEnabled` and `abstractionAnchorsEnabled`
-- keep anchor storage under the existing abstraction root instead of adding a second top-level config knob
-- store typed cue anchors by cue type: `entity`, `file`, `tool`, `outcome`, `constraint`, and `date`
-- link each anchor to one or more abstraction-node IDs
-- expose status counts by anchor type plus linked-node totals
-- avoid retrieval blending in this PR
+- add one dedicated recall section: `harmonic-retrieval`
+- blend abstraction-node lexical relevance with cue-anchor lexical relevance
+- preserve explainability by reporting:
+  - matched anchors
+  - matched fields
+  - node-score vs anchor-score contribution
+- add an operator diagnostic command:
+  - `openclaw engram harmonic-search <query>`
+- do not add writer automation or learned weighting in this slice
 
-This preserves small-slice discipline. PR18 is not harmonic retrieval. It is
-the smallest bounded indexing change that makes abstraction cues visible and
-reviewable before scoring logic appears.
+This keeps the first harmonic retrieval behavior inspectable. If the blend is
+bad, operators can see why. If it is good, later benchmark work has a concrete
+surface to measure.
 
 ## Key Discoveries
 
-- Harmonic retrieval needs its cue substrate before it needs ranking.
-- Abstraction nodes should encode compression structure, while cue anchors
-  encode retrieval handles. Mixing both into one record would make later
-  diagnostics much harder.
-- Operator-facing status commands keep new stores honest. If a new memory layer
-  cannot report valid, invalid, latest, and per-type counts, it is still too
-  implicit to tune safely.
+- Harmonic retrieval is more reviewable as its own recall section before any
+  deeper blending into generic memory recall.
+- Cue anchors and abstraction nodes need separate score components. A blended
+  total without a breakdown is not diagnosable enough for early rollout.
+- The existing recall-pipeline pattern already supports this slice cleanly:
+  objective state, causal trajectories, trust zones, and harmonic retrieval can
+  all coexist as bounded sections without mutating the generic memory path.
 
 ## Open Questions
 
-- Should future abstraction writers emit anchors directly during node creation,
-  or should a later offline linker derive anchors from existing nodes?
-- Should `file` and `date` anchors normalize to stricter canonical forms before
-  PR19, or is current typed storage sufficient for the first blend?
-- When PR19 arrives, should harmonic blending inject a new dedicated recall
-  section first, or blend directly into existing semantic recall ranking?
+- Should PR20 eventually let strong harmonic matches influence generic memory
+  ranking, or should the harmonic section remain permanently separate?
+- Do future harmonic diagnostics need per-anchor weights by type, or is the
+  current structural blend enough until benchmark data says otherwise?
+- Should later abstraction writers emit anchor candidates directly, or should a
+  linker continue to own anchor creation for better reviewability?

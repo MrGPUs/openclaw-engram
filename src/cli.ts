@@ -65,6 +65,10 @@ import {
   getCueAnchorStoreStatus,
   type CueAnchorStoreStatus,
 } from "./cue-anchors.js";
+import {
+  searchHarmonicRetrieval,
+  type HarmonicRetrievalResult,
+} from "./harmonic-retrieval.js";
 import { getObjectiveStateStoreStatus, type ObjectiveStateStoreStatus } from "./objective-state.js";
 import {
   getTrustZoneStoreStatus,
@@ -716,6 +720,26 @@ export async function runCueAnchorStatusCliCommand(options: {
     memoryDir: options.memoryDir,
     abstractionNodeStoreDir: options.abstractionNodeStoreDir,
     enabled: options.harmonicRetrievalEnabled,
+    anchorsEnabled: options.abstractionAnchorsEnabled,
+  });
+}
+
+export async function runHarmonicSearchCliCommand(options: {
+  memoryDir: string;
+  abstractionNodeStoreDir?: string;
+  harmonicRetrievalEnabled: boolean;
+  abstractionAnchorsEnabled: boolean;
+  query: string;
+  maxResults?: number;
+  sessionKey?: string;
+}): Promise<HarmonicRetrievalResult[]> {
+  if (!options.harmonicRetrievalEnabled) return [];
+  return searchHarmonicRetrieval({
+    memoryDir: options.memoryDir,
+    abstractionNodeStoreDir: options.abstractionNodeStoreDir,
+    query: options.query,
+    maxResults: Math.max(1, Math.floor(options.maxResults ?? 3)),
+    sessionKey: options.sessionKey,
     anchorsEnabled: options.abstractionAnchorsEnabled,
   });
 }
@@ -2386,6 +2410,31 @@ export function registerCli(api: CliApi, orchestrator: Orchestrator): void {
             abstractionAnchorsEnabled: orchestrator.config.abstractionAnchorsEnabled,
           });
           console.log(JSON.stringify(status, null, 2));
+          console.log("OK");
+        });
+
+      cmd
+        .command("harmonic-search")
+        .description("Preview harmonic retrieval blending over abstraction nodes and cue anchors")
+        .argument("<query>", "Prompt-like query to evaluate against harmonic retrieval storage")
+        .option("--max-results <count>", "Maximum number of blended results to return", "3")
+        .option("--session-key <sessionKey>", "Optional session key for same-session tie-breaking")
+        .action(async (...args: unknown[]) => {
+          const query = typeof args[0] === "string" ? args[0] : "";
+          const options = (args[1] ?? {}) as Record<string, unknown>;
+          const maxResults = typeof options.maxResults === "string"
+            ? Number.parseInt(options.maxResults, 10)
+            : 3;
+          const results = await runHarmonicSearchCliCommand({
+            memoryDir: orchestrator.config.memoryDir,
+            abstractionNodeStoreDir: orchestrator.config.abstractionNodeStoreDir,
+            harmonicRetrievalEnabled: orchestrator.config.harmonicRetrievalEnabled,
+            abstractionAnchorsEnabled: orchestrator.config.abstractionAnchorsEnabled,
+            query,
+            maxResults: Number.isFinite(maxResults) ? maxResults : 3,
+            sessionKey: typeof options.sessionKey === "string" ? options.sessionKey : undefined,
+          });
+          console.log(JSON.stringify(results, null, 2));
           console.log("OK");
         });
 

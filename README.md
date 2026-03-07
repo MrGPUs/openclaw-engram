@@ -39,6 +39,7 @@ AI agents forget everything between conversations. Engram fixes that.
 - **Poisoning-defense corroboration** — Engram can now, when `memoryPoisoningDefenseEnabled` is enabled, score trust-zone provenance deterministically and require independent non-quarantine corroboration before risky `working -> trusted` promotions succeed.
 - **Red-team benchmark packs** — Engram's eval harness can now validate and count typed `memory-red-team` benchmark packs so poisoning-defense regression suites stay explicit and reviewable instead of hiding inside generic benchmark metadata.
 - **Cue-anchor index foundation** — Engram can now, when `harmonicRetrievalEnabled` and `abstractionAnchorsEnabled` are enabled, persist typed cue anchors for entities, files, tools, outcomes, constraints, and dates, inspect them with `openclaw engram cue-anchor-status`, and keep harmonic retrieval grounded in explicit abstraction-to-cue links before blending logic lands.
+- **Harmonic retrieval diagnostics** — Engram can now, when `harmonicRetrievalEnabled` is enabled, blend abstraction-node evidence with cue-anchor matches into a dedicated `Harmonic Retrieval` recall section and inspect those blended results with `openclaw engram harmonic-search`.
 - **Zero-config start** — Install, add an API key, restart. Engram works out of the box with sensible defaults and progressively unlocks advanced features as you enable them.
 
 ## Quick Start

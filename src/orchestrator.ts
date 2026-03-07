@@ -71,6 +71,7 @@ import { GraphIndex } from "./graph.js";
 import { searchCausalTrajectories, type CausalTrajectorySearchResult } from "./causal-trajectory.js";
 import { searchObjectiveStateSnapshots, type ObjectiveStateSearchResult } from "./objective-state.js";
 import { searchTrustZoneRecords, type TrustZoneSearchResult } from "./trust-zones.js";
+import { searchHarmonicRetrieval, type HarmonicRetrievalResult } from "./harmonic-retrieval.js";
 import { normalizeReplaySessionKey, type ReplayTurn } from "./replay/types.js";
 import type { MemorySummary } from "./types.js";
 import { chunkTranscriptEntries } from "./conversation-index/chunker.js";
@@ -2242,6 +2243,34 @@ export class Orchestrator {
       return results.length > 0 ? this.formatTrustZoneResults(results) : null;
     })();
 
+    const harmonicRetrievalPromise = (async (): Promise<string | null> => {
+      const t0 = Date.now();
+      if (
+        !this.config.harmonicRetrievalEnabled ||
+        !this.isRecallSectionEnabled("harmonic-retrieval", this.config.harmonicRetrievalEnabled === true)
+      ) {
+        timings.harmonicRetrieval = "skip";
+        return null;
+      }
+      const maxResults = this.getRecallSectionNumber("harmonic-retrieval", "maxResults") ?? 3;
+      if (maxResults <= 0) {
+        timings.harmonicRetrieval = "skip(limit=0)";
+        return null;
+      }
+
+      const results = await searchHarmonicRetrieval({
+        memoryDir: this.config.memoryDir,
+        abstractionNodeStoreDir: this.config.abstractionNodeStoreDir,
+        query: retrievalQuery,
+        maxResults,
+        sessionKey,
+        anchorsEnabled: this.config.abstractionAnchorsEnabled,
+      });
+
+      timings.harmonicRetrieval = `${Date.now() - t0}ms`;
+      return results.length > 0 ? this.formatHarmonicRetrievalResults(results) : null;
+    })();
+
     // 2. QMD search (the slow part — runs in parallel with preamble)
     type QmdPhaseResult = {
       memoryResultsLists: QmdSearchResult[][];
@@ -2508,6 +2537,7 @@ export class Orchestrator {
       objectiveStateSection,
       causalTrajectorySection,
       trustZoneSection,
+      harmonicRetrievalSection,
       qmdResult,
       transcriptSection,
       compactionSection,
@@ -2523,6 +2553,7 @@ export class Orchestrator {
       objectiveStatePromise,
       causalTrajectoryPromise,
       trustZonePromise,
+      harmonicRetrievalPromise,
       qmdPromise,
       transcriptPromise,
       compactionPromise,
@@ -2607,6 +2638,10 @@ export class Orchestrator {
 
     if (trustZoneSection) {
       this.appendRecallSection(sectionBuckets, "trust-zones", trustZoneSection);
+    }
+
+    if (harmonicRetrievalSection) {
+      this.appendRecallSection(sectionBuckets, "harmonic-retrieval", harmonicRetrievalSection);
     }
 
     // 2. QMD results — post-process and format
@@ -5362,6 +5397,30 @@ export class Orchestrator {
     });
 
     return `## Trust Zones\n\n${lines.join("\n\n")}`;
+  }
+
+  private formatHarmonicRetrievalResults(results: HarmonicRetrievalResult[]): string {
+    const lines = results.map(({ node, matchedAnchors, matchedFields, nodeScore, anchorScore }, index) => {
+      const header = [
+        `[${index + 1}] ${node.recordedAt.replace("T", " ").slice(0, 16)}`,
+        `${node.kind}/${node.abstractionLevel}`,
+        node.sessionKey,
+      ].join(" | ");
+      const details = [
+        node.title,
+        node.summary,
+        `scores: node=${nodeScore.toFixed(1)} anchor=${anchorScore.toFixed(1)}`,
+      ];
+      if (matchedAnchors.length > 0) {
+        details.push(`anchors: ${matchedAnchors.map((anchor) => `${anchor.anchorType}:${anchor.anchorValue}`).join("; ")}`);
+      }
+      if (matchedFields.length > 0) {
+        details.push(`matched: ${matchedFields.join(", ")}`);
+      }
+      return `${header}\n${details.join("\n")}`;
+    });
+
+    return `## Harmonic Retrieval\n\n${lines.join("\n\n")}`;
   }
 
   private summarizeIdentityText(raw: string, maxLines: number, maxChars: number): string {

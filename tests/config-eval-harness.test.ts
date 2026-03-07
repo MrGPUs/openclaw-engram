@@ -33,6 +33,7 @@ test("evaluation harness config defaults off and derives store dir from memoryDi
   assert.equal(cfg.recallPipeline.some((entry) => entry.id === "objective-state" && entry.enabled === false), true);
   assert.equal(cfg.recallPipeline.some((entry) => entry.id === "causal-trajectories" && entry.enabled === false), true);
   assert.equal(cfg.recallPipeline.some((entry) => entry.id === "trust-zones" && entry.enabled === false), true);
+  assert.equal(cfg.recallPipeline.some((entry) => entry.id === "harmonic-retrieval" && entry.enabled === false), true);
 });
 
 test("evaluation harness config respects explicit flags and custom store dir", () => {
@@ -81,4 +82,5 @@ test("evaluation harness config respects explicit flags and custom store dir", (
   assert.equal(cfg.harmonicRetrievalEnabled, true);
   assert.equal(cfg.abstractionAnchorsEnabled, true);
   assert.equal(cfg.abstractionNodeStoreDir, "/tmp/abstraction-node-store");
+  assert.equal(cfg.recallPipeline.some((entry) => entry.id === "harmonic-retrieval" && entry.enabled === true), true);
 });
