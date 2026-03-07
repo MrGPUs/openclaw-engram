@@ -153,6 +153,7 @@ openclaw engram benchmark-status             # Benchmark/eval harness packs, run
 openclaw engram benchmark-validate <path>    # Validate a benchmark manifest or pack directory
 openclaw engram benchmark-import <path>      # Import a validated benchmark pack into the eval store
 openclaw engram benchmark-ci-gate            # Compare base vs candidate eval stores and fail on regressions
+openclaw engram objective-state-status       # Objective-state snapshot counts and latest stored snapshot
 openclaw engram conversation-index-health    # Conversation index status
 openclaw engram graph-health                 # Entity graph status
 openclaw engram tier-status                  # Hot/cold tier metrics
@@ -175,6 +176,9 @@ Key settings:
 | `evalHarnessEnabled` | `false` | Enable the evaluation harness for benchmark packs, run summaries, and shadow recall bookkeeping |
 | `evalShadowModeEnabled` | `false` | Record live recall decisions to the eval store without changing injected output |
 | `evalStoreDir` | `{memoryDir}/state/evals` | Root directory for benchmark packs, run summaries, and shadow recall records |
+| `objectiveStateMemoryEnabled` | `false` | Enable the objective-state memory foundation for normalized world/tool state snapshots |
+| `objectiveStateSnapshotWritesEnabled` | `false` | Permit objective-state snapshot writers to persist typed state records |
+| `objectiveStateStoreDir` | `{memoryDir}/state/objective-state` | Root directory for objective-state snapshots |
 
 Full reference: [Config Reference](docs/config-reference.md)
 
