@@ -95,6 +95,25 @@ test("deriveObjectiveStateSnapshotsFromAgentMessages falls back to generic faile
   assert.equal(snapshots[0]?.toolName, "remote_search");
 });
 
+test("deriveObjectiveStateSnapshotsFromAgentMessages does not classify remove-prefixed tools as file operations", () => {
+  const snapshots = deriveObjectiveStateSnapshotsFromAgentMessages({
+    sessionKey: "agent:main",
+    recordedAt: "2026-03-07T12:01:05.000Z",
+    messages: [
+      {
+        role: "tool",
+        name: "remove_entry",
+        content: JSON.stringify({ ok: true }),
+      },
+    ],
+  });
+
+  assert.equal(snapshots.length, 1);
+  assert.equal(snapshots[0]?.kind, "tool");
+  assert.equal(snapshots[0]?.changeKind, "observed");
+  assert.equal(snapshots[0]?.scope, "remove_entry");
+});
+
 test("recordObjectiveStateSnapshotsFromAgentMessages does not abort on empty generic tool content", async () => {
   const memoryDir = await mkdtemp(path.join(os.tmpdir(), "engram-objective-state-empty-tool-"));
   const written = await recordObjectiveStateSnapshotsFromAgentMessages({

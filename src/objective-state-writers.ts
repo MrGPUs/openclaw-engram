@@ -31,6 +31,19 @@ function optionalString(value: unknown): string | undefined {
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
+function toolNameTokens(toolName: string | undefined): string[] {
+  if (!toolName) return [];
+  return toolName
+    .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((token) => token.length > 0);
+}
+
+function normalizedToolName(toolName: string | undefined): string {
+  return toolNameTokens(toolName).join("_");
+}
+
 function parseToolArguments(value: unknown): Record<string, unknown> | undefined {
   if (isRecord(value)) return value;
   if (typeof value !== "string") return undefined;
@@ -187,28 +200,29 @@ function inferOutcome(message: Record<string, unknown>, parsedPayload: unknown):
 }
 
 function isProcessTool(toolName: string | undefined, args: Record<string, unknown> | undefined): boolean {
-  const lowered = toolName?.toLowerCase() ?? "";
+  const tokens = toolNameTokens(toolName);
+  const normalizedName = normalizedToolName(toolName);
   if (pickString(args, ["cmd", "command", "script"])) return true;
   return ["exec", "shell", "bash", "terminal", "run_command", "exec_command"].some((token) =>
-    lowered.includes(token),
+    token.includes("_") ? normalizedName === token : tokens.includes(token),
   );
 }
 
 function isFileTool(toolName: string | undefined, args: Record<string, unknown> | undefined): boolean {
-  const lowered = toolName?.toLowerCase() ?? "";
+  const tokens = toolNameTokens(toolName);
   const fileScope = fileScopeFromArgs(args);
   if (fileScope.scope) return true;
   return ["file", "path", "patch", "directory", "mkdir", "rename", "move"].some((token) =>
-    lowered.includes(token),
+    tokens.includes(token),
   );
 }
 
 function inferFileChangeKind(toolName: string | undefined, outcome: ObjectiveStateOutcome): ObjectiveStateChangeKind {
   if (outcome === "failure") return "failed";
-  const lowered = toolName?.toLowerCase() ?? "";
-  if (["delete", "remove", "unlink"].some((token) => lowered.includes(token))) return "deleted";
-  if (["create", "mkdir", "new"].some((token) => lowered.includes(token))) return "created";
-  if (["write", "edit", "patch", "update", "append", "move", "rename"].some((token) => lowered.includes(token))) {
+  const tokens = toolNameTokens(toolName);
+  if (["delete", "remove", "unlink"].some((token) => tokens.includes(token))) return "deleted";
+  if (["create", "mkdir", "new"].some((token) => tokens.includes(token))) return "created";
+  if (["write", "edit", "patch", "update", "append", "move", "rename"].some((token) => tokens.includes(token))) {
     return "updated";
   }
   return "observed";
