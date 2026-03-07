@@ -36,6 +36,7 @@ AI agents forget everything between conversations. Engram fixes that.
 - **Causal trajectory recall** — Engram can now, when `causalTrajectoryRecallEnabled` is enabled, inject prompt-relevant causal chains back into recall context as a separate `Causal Trajectories` section with lightweight match explainability.
 - **Trust-zone promotion path** — Engram can now, when `trustZonesEnabled` and `quarantinePromotionEnabled` are enabled, persist typed quarantine, working, and trusted records, plan explicit promotions, block direct `quarantine -> trusted` jumps, and require anchored provenance before promoting risky working records into `trusted`.
 - **Trust-zone recall** — Engram can now, when `trustZoneRecallEnabled` is enabled, inject prompt-relevant `working` and `trusted` trust-zone records into recall context as a separate `Trust Zones` section while keeping `quarantine` material out of recall by default.
+- **Provenance trust scoring** — Engram can now, when `memoryPoisoningDefenseEnabled` is enabled, score trust-zone provenance deterministically from source class and evidence anchors so poisoning defenses start with measurable trust signals instead of opaque heuristics.
 - **Zero-config start** — Install, add an API key, restart. Engram works out of the box with sensible defaults and progressively unlocks advanced features as you enable them.
 
 ## Quick Start
@@ -197,6 +198,7 @@ Key settings:
 | `quarantinePromotionEnabled` | `false` | Allow explicit trust-zone promotions such as `quarantine -> working` and guarded `working -> trusted` |
 | `trustZoneStoreDir` | `{memoryDir}/state/trust-zones` | Root directory for trust-zone records |
 | `trustZoneRecallEnabled` | `false` | Inject prompt-relevant working and trusted trust-zone records into recall context |
+| `memoryPoisoningDefenseEnabled` | `false` | Enable deterministic provenance trust scoring in trust-zone status output as the first poisoning-defense signal |
 
 Full reference: [Config Reference](docs/config-reference.md)
 

@@ -1,78 +1,69 @@
-# Theory: Trust-Zone Retrieval Should Surface High-Trust Context Without Leaking Quarantine Noise
+# Theory: Trust Zones Need Retrieval First and Trust Signals Second
 
 ## Problem
 
-PR11 created trust-zone storage and PR12 created explicit promotion rules, but
-Engram still could not use those zones at recall time. That left the trust-zone
-track in an awkward middle state: records could be classified and promoted, yet
-the retrieval layer still treated trust as invisible.
+Trust zones are now a real Engram substrate: storage exists, explicit promotion
+rules exist, and recall can now surface `working` and `trusted` records without
+leaking `quarantine` by default. The next missing piece is still defensive
+clarity. Without an explicit provenance signal, later poisoning-defense work
+would have to infer trust indirectly from scattered promotion logic and zone
+membership alone.
 
-For the trust-zone track to improve agent action outcomes, Engram now needs a
-bounded retrieval surface that can expose higher-trust context without
-accidentally leaking quarantined material back into the prompt.
+That would make the defense track hard to benchmark and easy to regress. The
+right next step is not full corroboration or attack simulation yet. It is to
+make provenance quality measurable.
 
 ## Operating Theory
 
-The rollout order still matters:
+The trust-zone rollout is working because it has stayed ordered:
 
-1. create the store
-2. define explicit promotion rules
-3. make trust visible at recall time
-4. add trust scoring, corroboration, and poisoning defense
+1. store the trust tiers
+2. define bounded promotion rules
+3. expose a safe retrieval surface
+4. add explicit trust signals
+5. only then automate policy
 
-This means PR13 should not attempt automatic promotion, trust scoring, or
-cross-surface policy blending. It should do one thing: add a first recall
-surface that only reads `working` and `trusted` records and keeps `quarantine`
-out by default.
+PR13 completed step 3 by making trust visible at recall time. PR14 is step 4:
+derive one deterministic trust score from the provenance already stored on each
+record.
+
+That score is useful even before it changes decisions because it turns "trust"
+from an implicit idea into a contract that tests, operators, and later PRs can
+all inspect.
 
 ## Strategy
 
-The smallest useful retrieval slice is:
+Keep the slice narrow and defaults-off:
 
-- one new config flag: `trustZoneRecallEnabled`
-- one bounded recall-pipeline section: `trust-zones`
-- one store-side search helper over trust-zone records
-- one formatted recall section: `## Trust Zones`
+- leave the PR13 recall contract intact
+- compute trust from stored provenance only
+- expose the score in trust-zone status, not promotion automation
+- leave corroboration and red-team attack suites for later slices
 
-The retrieval contract for this slice is intentionally conservative:
-
-1. never surface `quarantine` records
-2. require lexical overlap for non-empty queries
-3. rank `trusted` above `working` when both are relevant
-4. keep trust-zone recall separate from objective-state and causal recall
-
-That gives the system immediate value without pretending the later poisoning and
-corroboration work is already done.
+This keeps the roadmap honest. Retrieval answers whether a record should be
+visible at all. Provenance scoring starts answering how strong the evidence is
+behind records that are already visible.
 
 ## Key Discoveries
 
-- Trust zones work better as their own recall section first. Blending them
-  directly into semantic memory ranking would hide whether the new signal is
-  actually helping.
-- Excluding `quarantine` by default is the simplest safe default. Operators can
-  still inspect quarantine content through status and promotion tooling without
-  leaking it into model context.
-- Zone priority should be a ranking tie-breaker, not an admission rule. Records
-  still need lexical relevance to appear for a non-empty query.
-- The same rollout pattern used for objective-state and causal trajectories
-  remains the right one here: store, explicit contract, then bounded recall.
-
-## Next Sequence
-
-The trust-zone track now looks like:
-
-1. PR11: trust-zone schemas and storage
-2. PR12: promotion rules and provenance enforcement
-3. PR13: trust-zone-aware retrieval filters and recall injection
-4. PR14+: provenance scoring, corroboration requirements, and poisoning defense
+- Trust-zone recall and trust scoring are complementary, not competing, slices.
+  Recall should stay bounded by zone plus lexical relevance; scoring should stay
+  bounded by provenance quality.
+- Provenance trust should be deterministic for a stored record. If the score
+  depends on query context or wall-clock timing, benchmark comparisons become
+  harder to trust.
+- The first score does not need model judgment. Source class plus explicit
+  anchors (`sourceId`, `evidenceHash`, `sessionKey`) is enough to establish a
+  useful first trust floor.
+- Trust scoring belongs in operator-visible status output first. That makes the
+  defense signal reviewable before later PRs rely on it for policy.
 
 ## Open Questions
 
-- Should future trust-aware retrieval blend trust-zone hits into objective-state
-  or causal sections once benchmark coverage exists, or should trust remain a
-  visibly separate section long term?
-- When provenance scoring lands, should `working` records require a minimum
-  corroboration score before recall, or is zone membership alone enough for the
-  first defense-aware rollout?
-- Should later creation-memory and commitment ledgers write directly to
-  `working`, or always start in `quarantine` unless promoted explicitly?
+- Should PR15 treat trust score as advisory context layered on top of
+  corroboration, or as part of promotion eligibility itself?
+- Should later retrieval slices use trust score only as a tie-breaker, or
+  should some low-trust material be filtered entirely once benchmark evidence
+  exists?
+- When PR16 adds red-team benchmark packs, should they assert on raw score
+  breakdowns, aggregate bands, or downstream promotion/retrieval outcomes?
