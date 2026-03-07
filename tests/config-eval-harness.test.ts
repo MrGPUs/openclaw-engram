@@ -6,7 +6,7 @@ import { parseConfig } from "../src/config.js";
 test("evaluation harness config defaults off and derives store dir from memoryDir", () => {
   const memoryDir = "/tmp/engram-memory";
   const cfg = parseConfig({
-    openaiApiKey: "sk-test",
+    openaiApiKey: "test-openai-key",
     memoryDir,
   });
 
@@ -17,7 +17,7 @@ test("evaluation harness config defaults off and derives store dir from memoryDi
 
 test("evaluation harness config respects explicit flags and custom store dir", () => {
   const cfg = parseConfig({
-    openaiApiKey: "sk-test",
+    openaiApiKey: "test-openai-key",
     memoryDir: "/tmp/engram-memory",
     evalHarnessEnabled: true,
     evalShadowModeEnabled: true,
