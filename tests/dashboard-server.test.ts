@@ -96,6 +96,35 @@ test("dashboard server serves health, graph, static assets, and websocket upgrad
   await server.stop();
 });
 
+test("dashboard origin check allows explicit and default http port 80", () => {
+  const server = new GraphDashboardServer({
+    memoryDir: "/tmp",
+    host: "127.0.0.1",
+    port: 80,
+    publicDir: path.join(process.cwd(), "dashboard", "public"),
+  });
+  (server as unknown as { boundPort: number }).boundPort = 80;
+
+  const isAllowedOrigin = (server as unknown as { isAllowedOrigin: (origin: string) => boolean }).isAllowedOrigin.bind(server);
+
+  assert.equal(isAllowedOrigin("http://127.0.0.1:80"), true);
+  assert.equal(isAllowedOrigin("http://127.0.0.1"), true);
+  assert.equal(isAllowedOrigin("http://localhost"), true);
+});
+
+test("dashboard origin check allows IPv6 loopback without brackets in hostname parsing", () => {
+  const server = new GraphDashboardServer({
+    memoryDir: "/tmp",
+    host: "127.0.0.1",
+    port: 8080,
+    publicDir: path.join(process.cwd(), "dashboard", "public"),
+  });
+  (server as unknown as { boundPort: number }).boundPort = 8080;
+
+  const isAllowedOrigin = (server as unknown as { isAllowedOrigin: (origin: string) => boolean }).isAllowedOrigin.bind(server);
+
+  assert.equal(isAllowedOrigin("http://[::1]:8080"), true);
+});
 test("dashboard websocket upgrade rejects non-loopback origin", async () => {
   const memoryDir = await mkdtemp(path.join(os.tmpdir(), "engram-dashboard-server-ws-origin-"));
   await mkdir(path.join(memoryDir, "state", "graphs"), { recursive: true });

@@ -30,7 +30,14 @@ type WsClient = {
   socket: Duplex;
 };
 
-const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
+const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1"]);
+
+function normalizeOriginHostname(hostname: string): string {
+  if (hostname.startsWith("[") && hostname.endsWith("]")) {
+    return hostname.slice(1, -1);
+  }
+  return hostname;
+}
 
 function websocketAcceptKey(clientKey: string): string {
   return createHash("sha1")
@@ -260,9 +267,11 @@ export class GraphDashboardServer {
     if (!origin) return false;
     try {
       const parsed = new URL(origin);
-      if (!LOOPBACK_HOSTS.has(parsed.hostname)) return false;
+      const hostname = normalizeOriginHostname(parsed.hostname);
+      if (!LOOPBACK_HOSTS.has(hostname)) return false;
       if (parsed.protocol !== "http:") return false;
-      return parsed.port === String(this.boundPort);
+      const originPort = parsed.port ? Number(parsed.port) : 80;
+      return Number.isFinite(originPort) && originPort === this.boundPort;
     } catch {
       return false;
     }
