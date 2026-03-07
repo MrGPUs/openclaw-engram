@@ -102,11 +102,18 @@ export async function recordCausalTrajectory(options: {
   await mkdir(trajectoriesDir, { recursive: true });
   await writeFile(filePath, JSON.stringify(validated, null, 2), "utf8");
   if (options.actionGraphRecallEnabled === true) {
-    const { appendCausalTrajectoryGraphEdges } = await import("./causal-trajectory-graph.js");
-    await appendCausalTrajectoryGraphEdges({
-      memoryDir: options.memoryDir,
-      record: validated,
-    });
+    try {
+      const { appendCausalTrajectoryGraphEdges } = await import("./causal-trajectory-graph.js");
+      await appendCausalTrajectoryGraphEdges({
+        memoryDir: options.memoryDir,
+        record: validated,
+      });
+    } catch (error) {
+      const { log } = await import("./logger.js");
+      log.warn(
+        `[causal-trajectory] action-conditioned graph write failed for ${validated.trajectoryId}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
   }
   return filePath;
 }

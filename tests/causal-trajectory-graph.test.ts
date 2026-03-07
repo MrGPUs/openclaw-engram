@@ -128,3 +128,26 @@ test("recordCausalTrajectory does not append graph edges when action graph wirin
     await rm(memoryDir, { recursive: true, force: true });
   }
 });
+
+test("recordCausalTrajectory fail-opens when graph append fails after the trajectory file is written", async () => {
+  const graphFailureRoot = await mkdtemp(path.join(os.tmpdir(), "engram-causal-graph-fail-root-"));
+  const trajectoryStoreDir = await mkdtemp(path.join(os.tmpdir(), "engram-causal-graph-fail-store-"));
+  const blockingFile = path.join(graphFailureRoot, "not-a-directory");
+  await import("node:fs/promises").then(({ writeFile }) => writeFile(blockingFile, "block graph dir", "utf8"));
+
+  try {
+    const filePath = await recordCausalTrajectory({
+      memoryDir: blockingFile,
+      causalTrajectoryStoreDir: trajectoryStoreDir,
+      actionGraphRecallEnabled: true,
+      record: buildRecord({
+        trajectoryId: "traj-graph-4",
+      }),
+    });
+
+    assert.equal(filePath, path.join(trajectoryStoreDir, "trajectories", "2026-03-07", "traj-graph-4.json"));
+  } finally {
+    await rm(graphFailureRoot, { recursive: true, force: true });
+    await rm(trajectoryStoreDir, { recursive: true, force: true });
+  }
+});
