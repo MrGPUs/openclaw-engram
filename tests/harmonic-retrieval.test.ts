@@ -139,6 +139,23 @@ test("searchHarmonicRetrieval blends abstraction-node and cue-anchor evidence", 
   assert.equal((results[0]?.anchorScore ?? 0) > 0, true);
 });
 
+test("searchHarmonicRetrieval does not double-count identical anchor value and normalized cue matches", async () => {
+  const memoryDir = await mkdtemp(path.join(os.tmpdir(), "engram-harmonic-anchor-score-"));
+  await seedHarmonicStore(memoryDir);
+
+  const results = await searchHarmonicRetrieval({
+    memoryDir,
+    query: "cursor terminal state",
+    maxResults: 1,
+    sessionKey: "agent:main",
+    anchorsEnabled: true,
+  });
+
+  assert.equal(results.length, 1);
+  assert.equal(results[0]?.node.nodeId, "abstraction-pr-loop");
+  assert.equal(results[0]?.anchorScore, 14);
+});
+
 test("searchHarmonicRetrieval returns no matches when query normalization strips all tokens", async () => {
   const memoryDir = await mkdtemp(path.join(os.tmpdir(), "engram-harmonic-stopwords-"));
   await seedHarmonicStore(memoryDir);

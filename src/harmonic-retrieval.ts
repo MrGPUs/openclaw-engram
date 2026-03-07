@@ -78,15 +78,12 @@ function scoreAnchor(anchor: CueAnchor, queryTokens: Set<string>): { score: numb
   let score = 0;
 
   const valueMatches = countRecallTokenOverlap(queryTokens, anchor.anchorValue);
-  if (valueMatches > 0) {
-    score += valueMatches * 4;
-    matchedFields.push("anchorValue");
-  }
-
   const normalizedMatches = countRecallTokenOverlap(queryTokens, anchor.normalizedCue);
-  if (normalizedMatches > 0) {
-    score += normalizedMatches * 4;
-    matchedFields.push("anchor");
+  const cueMatches = Math.max(valueMatches, normalizedMatches);
+  if (cueMatches > 0) {
+    score += cueMatches * 4;
+    if (valueMatches > 0) matchedFields.push("anchorValue");
+    if (normalizedMatches > 0) matchedFields.push("anchor");
   }
 
   const typeMatches = countRecallTokenOverlap(queryTokens, anchor.anchorType);
