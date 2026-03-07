@@ -83,6 +83,12 @@ export interface TrustZonePromotionResult {
   sourceRecord: TrustZoneRecord;
 }
 
+export interface TrustZoneSearchResult {
+  record: TrustZoneRecord;
+  score: number;
+  matchedFields: string[];
+}
+
 function validateMetadata(raw: unknown): Record<string, string> | undefined {
   return validateStringRecord(raw, "metadata");
 }
@@ -331,6 +337,117 @@ async function readTrustZoneRecords(options: {
     }
   }
   return { files, records, invalidRecords };
+}
+
+function normalizeTokens(value: string): string[] {
+  const stopWords = new Set(["the", "and", "for", "with", "from", "into", "that", "this", "why", "did", "what"]);
+  return value
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 3 && !stopWords.has(token));
+}
+
+function countOverlap(queryTokens: Set<string>, value: string | undefined): number {
+  if (!value) return 0;
+  const tokens = new Set(normalizeTokens(value));
+  let matches = 0;
+  for (const token of queryTokens) {
+    if (tokens.has(token)) matches += 1;
+  }
+  return matches;
+}
+
+function lexicalScoreTrustZoneRecord(
+  record: TrustZoneRecord,
+  queryTokens: Set<string>,
+): { score: number; matchedFields: string[] } {
+  const weightedFields: Array<[field: string, value: string | undefined, weight: number]> = [
+    ["summary", record.summary, 4],
+    ["kind", record.kind, 1],
+    ["zone", record.zone, 1],
+    ["sourceClass", record.provenance.sourceClass, 1],
+    ["entityRefs", record.entityRefs?.join(" "), 2],
+    ["tags", record.tags?.join(" "), 2],
+    ["metadata", record.metadata ? Object.values(record.metadata).join(" ") : undefined, 1],
+  ];
+
+  let score = 0;
+  const matchedFields: string[] = [];
+  for (const [field, value, weight] of weightedFields) {
+    const matches = countOverlap(queryTokens, value);
+    if (matches > 0) matchedFields.push(field);
+    score += matches * weight;
+  }
+  return { score, matchedFields };
+}
+
+function zonePriority(zone: TrustZoneName): number {
+  switch (zone) {
+    case "trusted":
+      return 3;
+    case "working":
+      return 2;
+    case "quarantine":
+      return 1;
+  }
+}
+
+function scoreTrustZoneRecord(
+  record: TrustZoneRecord,
+  lexicalScore: number,
+  sessionKey?: string,
+): number {
+  let score = lexicalScore;
+  score += zonePriority(record.zone);
+  if (sessionKey && record.provenance.sessionKey === sessionKey) score += 1;
+
+  const recordedAtMs = Date.parse(record.recordedAt);
+  if (Number.isFinite(recordedAtMs)) {
+    const ageHours = Math.max(0, (Date.now() - recordedAtMs) / 3_600_000);
+    score += 1 / (1 + ageHours);
+  }
+  return score;
+}
+
+export async function searchTrustZoneRecords(options: {
+  memoryDir: string;
+  trustZoneStoreDir?: string;
+  query: string;
+  maxResults: number;
+  sessionKey?: string;
+}): Promise<TrustZoneSearchResult[]> {
+  const maxResults = Math.max(0, Math.floor(options.maxResults));
+  if (maxResults === 0) return [];
+
+  const { records } = await readTrustZoneRecords(options);
+  const candidates = records.filter((record) => record.zone !== "quarantine");
+  if (candidates.length === 0) return [];
+
+  const queryTokens = new Set(normalizeTokens(options.query));
+  if (queryTokens.size === 0) return [];
+
+  const scored = candidates.map((record) => {
+    const lexical = lexicalScoreTrustZoneRecord(record, queryTokens);
+    return {
+      record,
+      matchedFields: lexical.matchedFields,
+      lexicalScore: lexical.score,
+      score: scoreTrustZoneRecord(record, lexical.score, options.sessionKey),
+    };
+  });
+
+  const filtered = scored.filter((result) => result.lexicalScore > 0);
+  filtered.sort((left, right) => {
+    if (right.score !== left.score) return right.score - left.score;
+    return right.record.recordedAt.localeCompare(left.record.recordedAt);
+  });
+
+  return filtered.slice(0, maxResults).map(({ record, score, matchedFields }) => ({
+    record,
+    score,
+    matchedFields,
+  }));
 }
 
 export async function getTrustZoneStoreStatus(options: {
