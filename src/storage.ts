@@ -240,12 +240,21 @@ function parseFrontmatter(
     // Parse importance reasons array
     let reasons: string[] = [];
     const reasonsStr = fm.importanceReasons ?? "";
-    const reasonsMatch = reasonsStr.match(/\[(.*)]/);
-    if (reasonsMatch) {
-      reasons = reasonsMatch[1]
-        .split(/",\s*"/)
-        .map((r) => r.replace(/^"|"$/g, "").replace(/\\\\/g, "\\").replace(/\\"/g, '"'))
-        .filter(Boolean);
+    if (reasonsStr.trim().startsWith("[") && reasonsStr.trim().endsWith("]")) {
+      try {
+        const parsed = JSON.parse(reasonsStr);
+        if (Array.isArray(parsed)) {
+          reasons = parsed.filter((item) => typeof item === "string") as string[];
+        }
+      } catch {
+        const reasonsMatch = reasonsStr.match(/\[(.*)]/);
+        if (reasonsMatch) {
+          reasons = reasonsMatch[1]
+            .split(/",\s*"/)
+            .map((r) => r.replace(/^"|"$/g, "").replace(/\\"/g, '"'))
+            .filter(Boolean);
+        }
+      }
     }
 
     // Parse importance keywords array
