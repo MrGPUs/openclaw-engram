@@ -169,6 +169,17 @@ function serializeFrontmatter(fm: MemoryFrontmatter): string {
   return lines.join("\n");
 }
 
+function parseLinkReasonValue(rawValue: string): string {
+  try {
+    return JSON.parse(`"${rawValue}"`) as string;
+  } catch {
+    // Backward-compat fallback for legacy files that escaped quotes but not
+    // backslashes (e.g. "C:\Users"). Preserve backslashes literally while
+    // still unescaping legacy quote escapes.
+    return rawValue.replace(/\\"/g, '"');
+  }
+}
+
 function parseFrontmatter(
   raw: string,
 ): { frontmatter: MemoryFrontmatter; content: string } | null {
@@ -315,7 +326,7 @@ function parseFrontmatter(
         targetId: match[1],
         linkType: match[2] as MemoryLink["linkType"],
         strength: parseFloat(match[3]),
-        reason: match[4] ? JSON.parse(`"${match[4]}"`) : undefined,
+        reason: match[4] ? parseLinkReasonValue(match[4]) : undefined,
       });
     }
     if (links.length > 0) {
