@@ -114,6 +114,296 @@ test("deriveObjectiveStateSnapshotsFromAgentMessages does not classify remove-pr
   assert.equal(snapshots[0]?.scope, "remove_entry");
 });
 
+test("deriveObjectiveStateSnapshotsFromAgentMessages does not mark success text with 'errors' as failure", () => {
+  const snapshots = deriveObjectiveStateSnapshotsFromAgentMessages({
+    sessionKey: "agent:main",
+    recordedAt: "2026-03-07T12:01:10.000Z",
+    messages: [
+      {
+        role: "tool",
+        name: "lint_run",
+        content: "Linting complete: 0 errors found. Previously failed test now passes.",
+      },
+    ],
+  });
+
+  assert.equal(snapshots.length, 1);
+  assert.equal(snapshots[0]?.kind, "tool");
+  assert.equal(snapshots[0]?.outcome, "success");
+  assert.equal(snapshots[0]?.changeKind, "observed");
+});
+
+test("deriveObjectiveStateSnapshotsFromAgentMessages does not let zero-error phrases hide non-zero errors", () => {
+  const snapshots = deriveObjectiveStateSnapshotsFromAgentMessages({
+    sessionKey: "agent:main",
+    recordedAt: "2026-03-07T12:01:10.125Z",
+    messages: [
+      {
+        role: "tool",
+        name: "lint_run",
+        content: "Module A: no errors. Module B: 3 errors.",
+      },
+    ],
+  });
+
+  assert.equal(snapshots.length, 1);
+  assert.equal(snapshots[0]?.outcome, "failure");
+  assert.equal(snapshots[0]?.changeKind, "failed");
+});
+
+test("deriveObjectiveStateSnapshotsFromAgentMessages treats past-tense recovered failures as success", () => {
+  const snapshots = deriveObjectiveStateSnapshotsFromAgentMessages({
+    sessionKey: "agent:main",
+    recordedAt: "2026-03-07T12:01:11.000Z",
+    messages: [
+      {
+        role: "tool",
+        name: "test_run",
+        content: "Smoke check complete: failed test now passed.",
+      },
+    ],
+  });
+
+  assert.equal(snapshots.length, 1);
+  assert.equal(snapshots[0]?.outcome, "success");
+  assert.equal(snapshots[0]?.changeKind, "observed");
+});
+
+test("deriveObjectiveStateSnapshotsFromAgentMessages treats bare pass text as success", () => {
+  const snapshots = deriveObjectiveStateSnapshotsFromAgentMessages({
+    sessionKey: "agent:main",
+    recordedAt: "2026-03-07T12:01:11.250Z",
+    messages: [
+      {
+        role: "tool",
+        name: "test_run",
+        content: "All tests pass.",
+      },
+    ],
+  });
+
+  assert.equal(snapshots.length, 1);
+  assert.equal(snapshots[0]?.outcome, "success");
+  assert.equal(snapshots[0]?.changeKind, "observed");
+});
+
+test("deriveObjectiveStateSnapshotsFromAgentMessages treats recovered bare pass text as success", () => {
+  const snapshots = deriveObjectiveStateSnapshotsFromAgentMessages({
+    sessionKey: "agent:main",
+    recordedAt: "2026-03-07T12:01:11.500Z",
+    messages: [
+      {
+        role: "tool",
+        name: "test_run",
+        content: "Previously failed tests now pass.",
+      },
+    ],
+  });
+
+  assert.equal(snapshots.length, 1);
+  assert.equal(snapshots[0]?.outcome, "success");
+  assert.equal(snapshots[0]?.changeKind, "observed");
+});
+
+test("deriveObjectiveStateSnapshotsFromAgentMessages does not mark failure text with counts as success", () => {
+  const snapshots = deriveObjectiveStateSnapshotsFromAgentMessages({
+    sessionKey: "agent:main",
+    recordedAt: "2026-03-07T12:01:12.000Z",
+    messages: [
+      {
+        role: "tool",
+        name: "build_run",
+        content: "Build completed with 3 errors.",
+      },
+    ],
+  });
+
+  assert.equal(snapshots.length, 1);
+  assert.equal(snapshots[0]?.outcome, "failure");
+  assert.equal(snapshots[0]?.changeKind, "failed");
+});
+
+test("deriveObjectiveStateSnapshotsFromAgentMessages treats zero failures as non-failing output", () => {
+  const snapshots = deriveObjectiveStateSnapshotsFromAgentMessages({
+    sessionKey: "agent:main",
+    recordedAt: "2026-03-07T12:01:12.250Z",
+    messages: [
+      {
+        role: "tool",
+        name: "test_run",
+        content: "10 passed, 0 failures.",
+      },
+    ],
+  });
+
+  assert.equal(snapshots.length, 1);
+  assert.equal(snapshots[0]?.outcome, "success");
+  assert.equal(snapshots[0]?.changeKind, "observed");
+});
+
+test("deriveObjectiveStateSnapshotsFromAgentMessages treats zero exceptions as non-failing output", () => {
+  const snapshots = deriveObjectiveStateSnapshotsFromAgentMessages({
+    sessionKey: "agent:main",
+    recordedAt: "2026-03-07T12:01:12.500Z",
+    messages: [
+      {
+        role: "tool",
+        name: "exec_command",
+        content: "Validation finished with no exceptions found.",
+      },
+    ],
+  });
+
+  assert.equal(snapshots.length, 1);
+  assert.equal(snapshots[0]?.outcome, "success");
+  assert.equal(snapshots[0]?.changeKind, "executed");
+});
+
+test("deriveObjectiveStateSnapshotsFromAgentMessages treats common error class names as failures", () => {
+  const snapshots = deriveObjectiveStateSnapshotsFromAgentMessages({
+    sessionKey: "agent:main",
+    recordedAt: "2026-03-07T12:01:13.000Z",
+    messages: [
+      {
+        role: "tool",
+        name: "exec_command",
+        content: `TypeError: undefined is not a function
+NullPointerException at Example.run`,
+      },
+    ],
+  });
+
+  assert.equal(snapshots.length, 1);
+  assert.equal(snapshots[0]?.outcome, "failure");
+  assert.equal(snapshots[0]?.changeKind, "failed");
+});
+
+test("deriveObjectiveStateSnapshotsFromAgentMessages treats timed out phrases as failures", () => {
+  const snapshots = deriveObjectiveStateSnapshotsFromAgentMessages({
+    sessionKey: "agent:main",
+    recordedAt: "2026-03-07T12:01:14.000Z",
+    messages: [
+      {
+        role: "tool",
+        name: "remote_search",
+        content: "Request timed out after 30 seconds.",
+      },
+    ],
+  });
+
+  assert.equal(snapshots.length, 1);
+  assert.equal(snapshots[0]?.outcome, "failure");
+  assert.equal(snapshots[0]?.changeKind, "failed");
+});
+
+test("deriveObjectiveStateSnapshotsFromAgentMessages treats plural timeouts as failures", () => {
+  const snapshots = deriveObjectiveStateSnapshotsFromAgentMessages({
+    sessionKey: "agent:main",
+    recordedAt: "2026-03-07T12:01:14.250Z",
+    messages: [
+      {
+        role: "tool",
+        name: "remote_search",
+        content: "3 timeouts occurred during test execution.",
+      },
+    ],
+  });
+
+  assert.equal(snapshots.length, 1);
+  assert.equal(snapshots[0]?.outcome, "failure");
+  assert.equal(snapshots[0]?.changeKind, "failed");
+});
+
+test("deriveObjectiveStateSnapshotsFromAgentMessages treats negated success phrases as failures", () => {
+  const snapshots = deriveObjectiveStateSnapshotsFromAgentMessages({
+    sessionKey: "agent:main",
+    recordedAt: "2026-03-07T12:01:14.500Z",
+    messages: [
+      {
+        role: "tool",
+        name: "tap_run",
+        content: "not ok 1 - objective-state outcome parser regression",
+      },
+    ],
+  });
+
+  assert.equal(snapshots.length, 1);
+  assert.equal(snapshots[0]?.outcome, "failure");
+  assert.equal(snapshots[0]?.changeKind, "failed");
+});
+
+test("deriveObjectiveStateSnapshotsFromAgentMessages treats bare pass negations as failures", () => {
+  const snapshots = deriveObjectiveStateSnapshotsFromAgentMessages({
+    sessionKey: "agent:main",
+    recordedAt: "2026-03-07T12:01:14.750Z",
+    messages: [
+      {
+        role: "tool",
+        name: "test_run",
+        content: "Tests did not pass.",
+      },
+    ],
+  });
+
+  assert.equal(snapshots.length, 1);
+  assert.equal(snapshots[0]?.outcome, "failure");
+  assert.equal(snapshots[0]?.changeKind, "failed");
+});
+
+test("deriveObjectiveStateSnapshotsFromAgentMessages treats contraction negations as failures", () => {
+  const snapshots = deriveObjectiveStateSnapshotsFromAgentMessages({
+    sessionKey: "agent:main",
+    recordedAt: "2026-03-07T12:01:14.875Z",
+    messages: [
+      {
+        role: "tool",
+        name: "test_run",
+        content: "Tests didn't pass.",
+      },
+    ],
+  });
+
+  assert.equal(snapshots.length, 1);
+  assert.equal(snapshots[0]?.outcome, "failure");
+  assert.equal(snapshots[0]?.changeKind, "failed");
+});
+
+test("deriveObjectiveStateSnapshotsFromAgentMessages treats standalone previously failed text as failure", () => {
+  const snapshots = deriveObjectiveStateSnapshotsFromAgentMessages({
+    sessionKey: "agent:main",
+    recordedAt: "2026-03-07T12:01:14.938Z",
+    messages: [
+      {
+        role: "tool",
+        name: "build_run",
+        content: "Build previously failed.",
+      },
+    ],
+  });
+
+  assert.equal(snapshots.length, 1);
+  assert.equal(snapshots[0]?.outcome, "failure");
+  assert.equal(snapshots[0]?.changeKind, "failed");
+});
+
+test("deriveObjectiveStateSnapshotsFromAgentMessages treats plural failures as failures", () => {
+  const snapshots = deriveObjectiveStateSnapshotsFromAgentMessages({
+    sessionKey: "agent:main",
+    recordedAt: "2026-03-07T12:01:15.000Z",
+    messages: [
+      {
+        role: "tool",
+        name: "test_run",
+        content: "Test suite completed with 3 failures.",
+      },
+    ],
+  });
+
+  assert.equal(snapshots.length, 1);
+  assert.equal(snapshots[0]?.outcome, "failure");
+  assert.equal(snapshots[0]?.changeKind, "failed");
+});
+
 test("recordObjectiveStateSnapshotsFromAgentMessages does not abort on empty generic tool content", async () => {
   const memoryDir = await mkdtemp(path.join(os.tmpdir(), "engram-objective-state-empty-tool-"));
   const written = await recordObjectiveStateSnapshotsFromAgentMessages({

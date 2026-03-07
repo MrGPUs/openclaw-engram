@@ -192,9 +192,30 @@ function inferOutcome(message: Record<string, unknown>, parsedPayload: unknown):
   }
   if (typeof parsedPayload === "string") {
     const lowered = parsedPayload.toLowerCase();
-    if (lowered.includes("error") || lowered.includes("failed") || lowered.includes("exception")) {
-      return "failure";
-    }
+    const loweredForFailure = lowered
+      .replace(/\b(?:previously\s+)?failed tests?\s+now\s+pass(?:ed|es)?\b/g, "");
+    const hasZeroCountMarker = /\b(?:0|no)\s+(?:errors?|failures?|exceptions?|timeouts?)\b/.test(lowered);
+    const loweredForFailureCounts = loweredForFailure
+      .replace(/\b(?:0|no)\s+errors?\b/g, "")
+      .replace(/\b(?:0|no)\s+failures?\b/g, "")
+      .replace(/\b(?:0|no)\s+exceptions?\b/g, "")
+      .replace(/\b(?:0|no)\s+timeouts?\b/g, "");
+    const hasNonZeroErrorCounts = /\b[1-9]\d*\s+errors?\b/.test(loweredForFailureCounts);
+    const hasNegatedSuccessMarkers =
+      /\b(?:not|did not|didn't|doesn't|isn't|aren't|wasn't|weren't|won't|can't|couldn't|shouldn't|wouldn't)\s+(?:ok|pass|passed|passes|succeeded|success)\b/.test(loweredForFailure);
+    const hasSuccessMarkers =
+      /\b(success|succeeded|pass|passes|passed|ok)\b/.test(lowered) ||
+      hasZeroCountMarker;
+    const hasFailureMarkers =
+      hasNegatedSuccessMarkers ||
+      /\b(exceptions?|failed|failures?|fatal|timeouts?|timed out)\b/.test(loweredForFailureCounts) ||
+      hasNonZeroErrorCounts ||
+      /\berrors?\b/.test(loweredForFailureCounts) ||
+      /\b[a-z]+error\b/.test(loweredForFailureCounts) ||
+      /\b[a-z]+exception\b/.test(loweredForFailureCounts);
+
+    if (hasFailureMarkers) return "failure";
+    if (hasSuccessMarkers) return "success";
   }
   return "unknown";
 }
