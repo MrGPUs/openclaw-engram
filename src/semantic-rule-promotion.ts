@@ -41,6 +41,10 @@ function canonicalizeRuleContent(value: string): string {
   return extractExplicitIfThenRule(value) ?? normalizeRuleWhitespace(value);
 }
 
+function canonicalizeRuleKey(value: string): string {
+  return canonicalizeRuleContent(value).toLowerCase();
+}
+
 function extractExplicitIfThenRule(content: string): string | null {
   const match = content.match(/\bif\b([\s\S]+?)\bthen\b([\s\S]+?)(?:[.!?](?:\s|$)|$)/i);
   if (!match) return null;
@@ -116,11 +120,12 @@ export async function promoteSemanticRuleFromMemory(options: {
     return report;
   }
 
+  const ruleKey = canonicalizeRuleKey(content);
   const existingRule = (await storage.readAllMemories()).find(
     (memory) =>
       memory.frontmatter.category === "rule" &&
       memory.frontmatter.status !== "archived" &&
-      canonicalizeRuleContent(memory.content) === content,
+      canonicalizeRuleKey(memory.content) === ruleKey,
   );
   if (existingRule) {
     report.skipped.push({

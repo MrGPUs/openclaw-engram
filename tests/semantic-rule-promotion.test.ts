@@ -212,6 +212,41 @@ test("promoteSemanticRuleFromMemory dedupes against existing rule memories with 
   assert.equal(report.skipped[0]?.existingRuleId, existingRuleId);
 });
 
+test("promoteSemanticRuleFromMemory dedupes against existing rule memories with different body-text casing", async () => {
+  const { memoryDir, storage } = await createStore();
+  const existingRuleId = await storage.writeMemory(
+    "rule",
+    "IF The Build Fails THEN Revert.",
+    {
+      source: "test",
+      tags: ["builds"],
+      confidence: 0.9,
+      memoryKind: "note",
+    },
+  );
+
+  const sourceEpisodeId = await storage.writeMemory(
+    "fact",
+    "if the build fails then revert",
+    {
+      source: "test",
+      tags: ["builds"],
+      confidence: 0.9,
+      memoryKind: "episode",
+    },
+  );
+
+  const report = await promoteSemanticRuleFromMemory({
+    memoryDir,
+    enabled: true,
+    sourceMemoryId: sourceEpisodeId,
+  });
+
+  assert.equal(report.promoted.length, 0);
+  assert.equal(report.skipped[0]?.reason, "duplicate-rule");
+  assert.equal(report.skipped[0]?.existingRuleId, existingRuleId);
+});
+
 test("semantic-rule-promote CLI command honors the feature flag", async () => {
   const { memoryDir, storage } = await createStore();
   const sourceMemoryId = await storage.writeMemory(
