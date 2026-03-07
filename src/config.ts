@@ -1013,6 +1013,12 @@ function buildDefaultRecallPipeline(cfg: Record<string, unknown>): RecallSection
       maxChars: 1800,
     },
     {
+      id: "harmonic-retrieval",
+      enabled: cfg.harmonicRetrievalEnabled === true,
+      maxResults: 3,
+      maxChars: 2200,
+    },
+    {
       id: "memories",
       enabled: true,
       maxResults:
