@@ -91,6 +91,7 @@ export function validateCausalTrajectoryRecord(raw: unknown): CausalTrajectoryRe
 export async function recordCausalTrajectory(options: {
   memoryDir: string;
   causalTrajectoryStoreDir?: string;
+  actionGraphRecallEnabled?: boolean;
   record: CausalTrajectoryRecord;
 }): Promise<string> {
   const rootDir = resolveCausalTrajectoryStoreDir(options.memoryDir, options.causalTrajectoryStoreDir);
@@ -100,6 +101,20 @@ export async function recordCausalTrajectory(options: {
   const filePath = path.join(trajectoriesDir, `${validated.trajectoryId}.json`);
   await mkdir(trajectoriesDir, { recursive: true });
   await writeFile(filePath, JSON.stringify(validated, null, 2), "utf8");
+  if (options.actionGraphRecallEnabled === true) {
+    try {
+      const { appendCausalTrajectoryGraphEdges } = await import("./causal-trajectory-graph.js");
+      await appendCausalTrajectoryGraphEdges({
+        memoryDir: options.memoryDir,
+        record: validated,
+      });
+    } catch (error) {
+      const { log } = await import("./logger.js");
+      log.warn(
+        `[causal-trajectory] action-conditioned graph write failed for ${validated.trajectoryId}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
   return filePath;
 }
 
