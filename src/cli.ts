@@ -61,6 +61,10 @@ import {
   getAbstractionNodeStoreStatus,
   type AbstractionNodeStoreStatus,
 } from "./abstraction-nodes.js";
+import {
+  getCueAnchorStoreStatus,
+  type CueAnchorStoreStatus,
+} from "./cue-anchors.js";
 import { getObjectiveStateStoreStatus, type ObjectiveStateStoreStatus } from "./objective-state.js";
 import {
   getTrustZoneStoreStatus,
@@ -695,6 +699,20 @@ export async function runAbstractionNodeStatusCliCommand(options: {
   abstractionAnchorsEnabled: boolean;
 }): Promise<AbstractionNodeStoreStatus> {
   return getAbstractionNodeStoreStatus({
+    memoryDir: options.memoryDir,
+    abstractionNodeStoreDir: options.abstractionNodeStoreDir,
+    enabled: options.harmonicRetrievalEnabled,
+    anchorsEnabled: options.abstractionAnchorsEnabled,
+  });
+}
+
+export async function runCueAnchorStatusCliCommand(options: {
+  memoryDir: string;
+  abstractionNodeStoreDir?: string;
+  harmonicRetrievalEnabled: boolean;
+  abstractionAnchorsEnabled: boolean;
+}): Promise<CueAnchorStoreStatus> {
+  return getCueAnchorStoreStatus({
     memoryDir: options.memoryDir,
     abstractionNodeStoreDir: options.abstractionNodeStoreDir,
     enabled: options.harmonicRetrievalEnabled,
@@ -2348,6 +2366,20 @@ export function registerCli(api: CliApi, orchestrator: Orchestrator): void {
         .description("Show abstraction-node store status, abstraction counts, and latest stored node")
         .action(async () => {
           const status = await runAbstractionNodeStatusCliCommand({
+            memoryDir: orchestrator.config.memoryDir,
+            abstractionNodeStoreDir: orchestrator.config.abstractionNodeStoreDir,
+            harmonicRetrievalEnabled: orchestrator.config.harmonicRetrievalEnabled,
+            abstractionAnchorsEnabled: orchestrator.config.abstractionAnchorsEnabled,
+          });
+          console.log(JSON.stringify(status, null, 2));
+          console.log("OK");
+        });
+
+      cmd
+        .command("cue-anchor-status")
+        .description("Show cue-anchor index status, anchor counts, and the latest stored cue anchor")
+        .action(async () => {
+          const status = await runCueAnchorStatusCliCommand({
             memoryDir: orchestrator.config.memoryDir,
             abstractionNodeStoreDir: orchestrator.config.abstractionNodeStoreDir,
             harmonicRetrievalEnabled: orchestrator.config.harmonicRetrievalEnabled,

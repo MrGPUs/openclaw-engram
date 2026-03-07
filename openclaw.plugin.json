@@ -1179,7 +1179,7 @@
       "abstractionAnchorsEnabled": {
         "type": "boolean",
         "default": false,
-        "description": "Reserve cue-anchor support for later harmonic-retrieval slices while exposing it in abstraction-node status output."
+        "description": "Enable typed cue-anchor indexing for abstraction nodes and expose it through cue-anchor status tooling."
       },
       "abstractionNodeStoreDir": {
         "type": "string",
@@ -2176,7 +2176,7 @@
     "abstractionAnchorsEnabled": {
       "label": "Abstraction Anchors",
       "advanced": true,
-      "help": "Reserve cue-anchor support for later harmonic-retrieval slices while exposing anchor readiness in abstraction-node status output."
+      "help": "Enable typed cue-anchor indexing for abstraction nodes and expose it through cue-anchor status tooling."
     },
     "abstractionNodeStoreDir": {
       "label": "Abstraction-Node Store Directory",
