@@ -47,7 +47,9 @@ import {
   getEvalHarnessStatus,
   importEvalBenchmarkPack,
   type EvalBenchmarkPackSummary,
+  type EvalCiGateReport,
   type EvalHarnessStatus,
+  runEvalBenchmarkCiGate,
   validateEvalBenchmarkPack,
 } from "./evals.js";
 import { analyzeGraphHealth, type GraphHealthReport } from "./graph.js";
@@ -80,6 +82,7 @@ interface CliProgram {
 interface CliCommand {
   description(desc: string): CliCommand;
   option(flags: string, desc: string, defaultValue?: string): CliCommand;
+  requiredOption(flags: string, desc: string, defaultValue?: string): CliCommand;
   argument(name: string, desc: string): CliCommand;
   action(fn: (...args: unknown[]) => Promise<void> | void): CliCommand;
   command(name: string): CliCommand;
@@ -607,6 +610,18 @@ export async function runBenchmarkImportCliCommand(options: {
     memoryDir: options.memoryDir,
     evalStoreDir: options.evalStoreDir,
     force: options.force === true,
+  });
+}
+
+export async function runBenchmarkCiGateCliCommand(options: {
+  baseEvalStoreDir: string;
+  candidateEvalStoreDir: string;
+}): Promise<EvalCiGateReport> {
+  return runEvalBenchmarkCiGate({
+    baseMemoryDir: options.baseEvalStoreDir,
+    candidateMemoryDir: options.candidateEvalStoreDir,
+    baseEvalStoreDir: options.baseEvalStoreDir,
+    candidateEvalStoreDir: options.candidateEvalStoreDir,
   });
 }
 
@@ -2152,6 +2167,24 @@ export function registerCli(api: CliApi, orchestrator: Orchestrator): void {
             force: options.force === true,
           });
           console.log(JSON.stringify(summary, null, 2));
+          console.log("OK");
+        });
+
+      cmd
+        .command("benchmark-ci-gate")
+        .description("Compare two eval stores and fail when the candidate regresses benchmark outcomes")
+        .requiredOption("--base <path>", "Path to the base eval store directory")
+        .requiredOption("--candidate <path>", "Path to the candidate eval store directory")
+        .action(async (...args: unknown[]) => {
+          const options = (args[0] ?? {}) as Record<string, unknown>;
+          const summary = await runBenchmarkCiGateCliCommand({
+            baseEvalStoreDir: typeof options.base === "string" ? options.base : "",
+            candidateEvalStoreDir: typeof options.candidate === "string" ? options.candidate : "",
+          });
+          console.log(JSON.stringify(summary, null, 2));
+          if (!summary.passed) {
+            throw new Error("benchmark CI gate detected regressions");
+          }
           console.log("OK");
         });
 

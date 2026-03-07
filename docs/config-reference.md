@@ -365,6 +365,7 @@ See [advanced-retrieval.md](advanced-retrieval.md) for guidance.
 |---------|---------|-------------|
 | `evalHarnessEnabled` | `false` | Enable Engram's benchmark/evaluation harness bookkeeping |
 | `evalShadowModeEnabled` | `false` | Record live recall decisions to the eval store without changing injected output |
+| `evalCiGateEnabled` | `false` | Expose benchmark delta gating config for CI comparison workflows |
 | `evalStoreDir` | `{memoryDir}/state/evals` | Root directory for benchmark packs, run summaries, and shadow recall records |
 
 Current foundation slice:
@@ -372,7 +373,8 @@ Current foundation slice:
 - When both eval flags are on, live recall also writes `shadow/YYYY-MM-DD/<trace-id>.json` records with hashes, counts, chosen source, and recalled memory IDs.
 - `openclaw engram benchmark-validate <path>` validates a manifest JSON file or a pack directory with a root `manifest.json`.
 - `openclaw engram benchmark-import <path> [--force]` validates first, then imports into `benchmarks/<benchmarkId>/`.
-- Future slices will add benchmark runners and PR regression gates on top of this store format.
+- `openclaw engram benchmark-ci-gate --base <dir> --candidate <dir>` compares two eval-store roots and fails when pass rate, shared metrics, or benchmark coverage regress.
+- Future slices will add automated benchmark runners on top of this store and gate format.
 
 | `conversationIndexEmbedOnUpdate` | `false` | Run `qmd embed` on each update |
 

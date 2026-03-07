@@ -17,18 +17,20 @@ This slice ships:
 
 - `evalHarnessEnabled`
 - `evalShadowModeEnabled`
+- `evalCiGateEnabled`
 - `evalStoreDir`
 - `openclaw engram benchmark-status`
 - `openclaw engram benchmark-validate <path>`
 - `openclaw engram benchmark-import <path> [--force]`
+- `openclaw engram benchmark-ci-gate --base <dir> --candidate <dir>`
 - typed benchmark manifest validation
 - typed run-summary validation
 - typed shadow recall recording for live recall decisions
+- typed base-vs-candidate eval-store comparison for CI gating
 
 This slice does **not** yet ship:
 
 - benchmark runners
-- PR regression gates
 - objective-state capture
 - trust-zoned promotion logic
 
@@ -143,6 +145,7 @@ These records are intentionally compact:
 openclaw engram benchmark-status
 openclaw engram benchmark-validate ./benchmarks/ama-memory
 openclaw engram benchmark-import ./benchmarks/ama-memory
+openclaw engram benchmark-ci-gate --base ./base-evals --candidate ./candidate-evals
 ```
 
 The command reports:
@@ -165,10 +168,20 @@ The validation/import tools:
 - preserve extra files when importing a directory pack
 - require `--force` to replace an existing imported benchmark pack
 
+The CI gate:
+
+- compares two eval-store roots
+- fails when candidate artifacts are invalid
+- fails when a benchmark with a latest completed run disappears from candidate
+- fails when pass rate or shared metrics regress
+- currently treats `trustViolationRate` as lower-is-better and other shared metrics as higher-is-better
+- is suitable for comparing checked-in eval snapshots today, before benchmark execution is fully automated
+
 ## Rollout Guidance
 
 - Keep `evalHarnessEnabled: false` by default in production until you want benchmark bookkeeping on disk.
 - Turn on `evalShadowModeEnabled` when you want to start recording live recall decisions for measurement without changing recall output.
+- Use `evalCiGateEnabled` to expose the config surface for CI benchmark-delta workflows; the CLI gate can be run even when runtime flags stay off.
 - Treat benchmark packs as versioned operator assets. PRs that change them should explain why the benchmark changed.
 
 ## Next Steps
@@ -179,3 +192,4 @@ See:
 - [PR1 Eval Harness Foundation Plan](plans/2026-03-06-engram-pr1-eval-harness-foundation.md)
 - [PR2 Benchmark Pack Validator And Import Tools](plans/2026-03-06-engram-pr2-benchmark-tools.md)
 - [PR3 Shadow Recording For Live Recall Decisions](plans/2026-03-07-engram-pr3-shadow-recording.md)
+- [PR4 CI Benchmark Delta Gate](plans/2026-03-07-engram-pr4-ci-benchmark-gate.md)

@@ -216,6 +216,7 @@ export interface PluginConfig {
   // Evaluation harness foundation
   evalHarnessEnabled: boolean;
   evalShadowModeEnabled: boolean;
+  evalCiGateEnabled: boolean;
   evalStoreDir: string;
   // Local LLM Provider (v2.1)
   localLlmEnabled: boolean;
