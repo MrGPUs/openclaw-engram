@@ -37,6 +37,10 @@ function stripTrailingClausePunctuation(value: string): string {
   return value.replace(/[,:;]+$/g, "").trim();
 }
 
+function canonicalizeRuleContent(value: string): string {
+  return extractExplicitIfThenRule(value) ?? normalizeRuleWhitespace(value);
+}
+
 export function extractExplicitIfThenRule(content: string): string | null {
   const match = content.match(/\bif\b([\s\S]+?)\bthen\b([\s\S]+?)(?:[.!?](?:\s|$)|$)/i);
   if (!match) return null;
@@ -116,7 +120,7 @@ export async function promoteSemanticRuleFromMemory(options: {
     (memory) =>
       memory.frontmatter.category === "rule" &&
       memory.frontmatter.status !== "archived" &&
-      normalizeRuleWhitespace(memory.content) === content,
+      canonicalizeRuleContent(memory.content) === content,
   );
   if (existingRule) {
     report.skipped.push({
