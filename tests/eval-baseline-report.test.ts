@@ -163,6 +163,7 @@ test("benchmark baseline report fails on regressions, missing candidate benchmar
   assert.equal(report.passed, false);
   assert.deepEqual(report.missingCandidateBenchmarks, ["objective-state"]);
   assert.equal(report.invalidArtifacts.candidate.baselines, 1);
+  assert.equal("baselineSnapshot" in report.invalidArtifacts, false);
   assert.match(report.regressions.join("\n"), /candidate is missing latest completed benchmark run for objective-state/);
   assert.match(report.regressions.join("\n"), /ama-memory pass rate regressed/);
   assert.match(report.regressions.join("\n"), /candidate store has 1 invalid baseline snapshot file/);

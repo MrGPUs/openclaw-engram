@@ -182,7 +182,6 @@ export interface EvalBaselineDeltaReport {
   comparedBenchmarks: number;
   missingCandidateBenchmarks: string[];
   invalidArtifacts: {
-    baselineSnapshot: number;
     candidate: {
       benchmarks: number;
       runs: number;
@@ -615,7 +614,6 @@ function formatEvalBaselineDeltaMarkdown(report: EvalBaselineDeltaReport): strin
 
   lines.push(
     `- Invalid candidate artifacts: benchmarks=${report.invalidArtifacts.candidate.benchmarks}, runs=${report.invalidArtifacts.candidate.runs}, shadows=${report.invalidArtifacts.candidate.shadows}, baselines=${report.invalidArtifacts.candidate.baselines}`,
-    `- Invalid baseline snapshots in store: ${report.invalidArtifacts.baselineSnapshot}`,
     "",
     "## Regressions",
   );
@@ -1070,7 +1068,6 @@ export async function runEvalBaselineDeltaReport(options: {
     comparedBenchmarks: deltas.length,
     missingCandidateBenchmarks,
     invalidArtifacts: {
-      baselineSnapshot: candidateSnapshot.status.invalidBaselines.length,
       candidate: {
         benchmarks: candidateSnapshot.status.invalidBenchmarks.length,
         runs: candidateSnapshot.status.invalidRuns.length,

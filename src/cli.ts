@@ -2771,8 +2771,9 @@ export function registerCli(api: CliApi, orchestrator: Orchestrator): void {
             benchmarkDeltaReporterEnabled: orchestrator.config.benchmarkDeltaReporterEnabled,
             snapshotId: typeof options.snapshotId === "string" ? options.snapshotId : "",
           });
-          console.log(JSON.stringify(summary, null, 2));
-          console.log(summary.markdownReport);
+          const { markdownReport, ...jsonSummary } = summary;
+          console.log(JSON.stringify(jsonSummary, null, 2));
+          console.log(markdownReport);
           if (!summary.passed) {
             throw new Error("benchmark baseline report detected regressions");
           }
