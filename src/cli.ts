@@ -95,6 +95,7 @@ import {
   type WorkProductLedgerStatus,
 } from "./work-product-ledger.js";
 import {
+  buildResumeBundleFromState,
   getResumeBundleStatus,
   recordResumeBundle,
   type ResumeBundle,
@@ -894,6 +895,50 @@ export async function runResumeBundleRecordCliCommand(options: {
     resumeBundleDir: options.resumeBundleDir,
     bundle: options.bundle,
   });
+}
+
+export async function runResumeBundleBuildCliCommand(options: {
+  memoryDir: string;
+  resumeBundleDir?: string;
+  objectiveStateStoreDir?: string;
+  workProductLedgerDir?: string;
+  commitmentLedgerDir?: string;
+  creationMemoryEnabled: boolean;
+  resumeBundlesEnabled: boolean;
+  transcriptEnabled: boolean;
+  objectiveStateMemoryEnabled: boolean;
+  commitmentLedgerEnabled: boolean;
+  bundleId: string;
+  recordedAt: string;
+  sessionKey: string;
+  scope: string;
+}): Promise<{ bundle: ResumeBundle; filePath: string } | null> {
+  if (!options.creationMemoryEnabled || !options.resumeBundlesEnabled) {
+    return null;
+  }
+
+  const bundle = await buildResumeBundleFromState({
+    memoryDir: options.memoryDir,
+    sessionKey: options.sessionKey,
+    bundleId: options.bundleId,
+    recordedAt: options.recordedAt,
+    scope: options.scope,
+    transcriptEnabled: options.transcriptEnabled,
+    objectiveStateMemoryEnabled: options.objectiveStateMemoryEnabled,
+    objectiveStateStoreDir: options.objectiveStateStoreDir,
+    creationMemoryEnabled: options.creationMemoryEnabled,
+    workProductLedgerDir: options.workProductLedgerDir,
+    commitmentLedgerEnabled: options.commitmentLedgerEnabled,
+    commitmentLedgerDir: options.commitmentLedgerDir,
+  });
+
+  const filePath = await recordResumeBundle({
+    memoryDir: options.memoryDir,
+    resumeBundleDir: options.resumeBundleDir,
+    bundle,
+  });
+
+  return { bundle, filePath };
 }
 
 export async function runCommitmentStatusCliCommand(options: {
@@ -2750,6 +2795,39 @@ export function registerCli(api: CliApi, orchestrator: Orchestrator): void {
             },
           });
           console.log(JSON.stringify({ wrote: filePath !== null, filePath }, null, 2));
+          console.log("OK");
+        });
+
+      cmd
+        .command("resume-bundle-build")
+        .description("Build and persist a resume bundle from transcript recovery, objective state, work products, and open commitments")
+        .requiredOption("--bundle-id <bundleId>", "Resume bundle id")
+        .requiredOption("--recorded-at <recordedAt>", "ISO timestamp for the bundle")
+        .requiredOption("--session-key <sessionKey>", "Session key that owns the bundle")
+        .requiredOption("--scope <scope>", "Primary scope or recovery domain for the bundle")
+        .action(async (...args: unknown[]) => {
+          const options = (args[0] ?? {}) as Record<string, unknown>;
+          const built = await runResumeBundleBuildCliCommand({
+            memoryDir: orchestrator.config.memoryDir,
+            resumeBundleDir: orchestrator.config.resumeBundleDir,
+            objectiveStateStoreDir: orchestrator.config.objectiveStateStoreDir,
+            workProductLedgerDir: orchestrator.config.workProductLedgerDir,
+            commitmentLedgerDir: orchestrator.config.commitmentLedgerDir,
+            creationMemoryEnabled: orchestrator.config.creationMemoryEnabled,
+            resumeBundlesEnabled: orchestrator.config.resumeBundlesEnabled,
+            transcriptEnabled: orchestrator.config.transcriptEnabled,
+            objectiveStateMemoryEnabled: orchestrator.config.objectiveStateMemoryEnabled,
+            commitmentLedgerEnabled: orchestrator.config.commitmentLedgerEnabled,
+            bundleId: String(options.bundleId ?? ""),
+            recordedAt: String(options.recordedAt ?? ""),
+            sessionKey: String(options.sessionKey ?? ""),
+            scope: String(options.scope ?? ""),
+          });
+          console.log(JSON.stringify({
+            wrote: built !== null,
+            filePath: built?.filePath ?? null,
+            bundle: built?.bundle ?? null,
+          }, null, 2));
           console.log("OK");
         });
 

@@ -844,6 +844,7 @@ All notable changes to this project will be documented in this file.
 - CLI tools for search, store, profile, entities, questions, identity
 # 2026-03-07
 
+- add PR28 resume-bundle builder: deterministic bundle assembly from transcript recovery, recent objective-state snapshots, work products, and open commitments, plus the `resume-bundle-build` CLI and docs/tests
 - add PR27 resume-bundle format foundation: typed bundle schema/store, config flags, operator-facing status/write CLI, and docs/tests
 - add PR5 objective-state memory foundation: typed snapshot schema/store, status CLI, feature flags, and docs/tests
 - add PR7 objective-state recall: bounded snapshot search, recall injection flag, objective-state recall section, and docs/tests
