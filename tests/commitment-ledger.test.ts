@@ -413,7 +413,6 @@ test("applyCommitmentLedgerLifecycle expires overdue commitments and removes age
   const lifecycle = await applyCommitmentLedgerLifecycle({
     memoryDir,
     enabled: true,
-    staleDays: 5,
     decayDays: 3,
     now: "2026-03-08T00:00:00.000Z",
   });
@@ -460,7 +459,6 @@ test("commitment lifecycle CLI command runs lifecycle pass only when enabled", a
     creationMemoryEnabled: true,
     commitmentLedgerEnabled: true,
     commitmentLifecycleEnabled: false,
-    commitmentStaleDays: 5,
     commitmentDecayDays: 3,
     now: "2026-03-08T00:00:00.000Z",
   });
@@ -471,7 +469,6 @@ test("commitment lifecycle CLI command runs lifecycle pass only when enabled", a
     creationMemoryEnabled: true,
     commitmentLedgerEnabled: true,
     commitmentLifecycleEnabled: true,
-    commitmentStaleDays: 5,
     commitmentDecayDays: 3,
     now: "2026-03-08T00:00:00.000Z",
   });

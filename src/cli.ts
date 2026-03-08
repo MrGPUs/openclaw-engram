@@ -934,7 +934,6 @@ export async function runCommitmentLifecycleCliCommand(options: {
   creationMemoryEnabled: boolean;
   commitmentLedgerEnabled: boolean;
   commitmentLifecycleEnabled: boolean;
-  commitmentStaleDays: number;
   commitmentDecayDays: number;
   now?: string;
 }): Promise<CommitmentLedgerLifecycleResult | null> {
@@ -950,7 +949,6 @@ export async function runCommitmentLifecycleCliCommand(options: {
     memoryDir: options.memoryDir,
     commitmentLedgerDir: options.commitmentLedgerDir,
     enabled: true,
-    staleDays: options.commitmentStaleDays,
     decayDays: options.commitmentDecayDays,
     now: options.now,
   });
@@ -2755,7 +2753,6 @@ export function registerCli(api: CliApi, orchestrator: Orchestrator): void {
             creationMemoryEnabled: orchestrator.config.creationMemoryEnabled,
             commitmentLedgerEnabled: orchestrator.config.commitmentLedgerEnabled,
             commitmentLifecycleEnabled: orchestrator.config.commitmentLifecycleEnabled,
-            commitmentStaleDays: orchestrator.config.commitmentStaleDays,
             commitmentDecayDays: orchestrator.config.commitmentDecayDays,
             now: typeof options.now === "string" ? options.now : undefined,
           });

@@ -241,7 +241,6 @@ export async function applyCommitmentLedgerLifecycle(options: {
   memoryDir: string;
   commitmentLedgerDir?: string;
   enabled: boolean;
-  staleDays: number;
   decayDays: number;
   now?: string;
 }): Promise<CommitmentLedgerLifecycleResult> {

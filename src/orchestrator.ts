@@ -4770,7 +4770,6 @@ export class Orchestrator {
           memoryDir: this.config.memoryDir,
           commitmentLedgerDir: this.config.commitmentLedgerDir,
           enabled: true,
-          staleDays: this.config.commitmentStaleDays,
           decayDays: this.config.commitmentDecayDays,
         });
         if (lifecycle.transitionedToExpired.length > 0 || lifecycle.deletedResolved.length > 0) {
