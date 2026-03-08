@@ -10,6 +10,7 @@ import {
   validateWorkProductLedgerEntry,
 } from "../src/work-product-ledger.js";
 import {
+  registerCli,
   runWorkProductRecordCliCommand,
   runWorkProductStatusCliCommand,
 } from "../src/cli.js";
@@ -157,4 +158,80 @@ test("work-product-record CLI command writes entries only when creation-memory i
   });
   assert.equal(status.entries.total, 1);
   assert.equal(status.latestEntry?.entryId, "wp-3");
+});
+
+test("work-product-record CLI wiring uses entryAction instead of Commander's reserved action option", async () => {
+  const memoryDir = await mkdtemp(path.join(os.tmpdir(), "engram-work-product-cli-wiring-"));
+
+  class MockCommand {
+    children = new Map<string, MockCommand>();
+    actionHandler?: (...args: unknown[]) => Promise<void> | void;
+
+    constructor(readonly name: string) {}
+
+    command(name: string): MockCommand {
+      const child = new MockCommand(name);
+      this.children.set(name, child);
+      return child;
+    }
+
+    description(): MockCommand {
+      return this;
+    }
+
+    option(): MockCommand {
+      return this;
+    }
+
+    requiredOption(): MockCommand {
+      return this;
+    }
+
+    argument(): MockCommand {
+      return this;
+    }
+
+    action(handler: (...args: unknown[]) => Promise<void> | void): MockCommand {
+      this.actionHandler = handler;
+      return this;
+    }
+  }
+
+  const root = new MockCommand("root");
+  registerCli(
+    {
+      registerCli(handler: (opts: { program: MockCommand }) => void): void {
+        handler({ program: root });
+      },
+    },
+    {
+      config: {
+        memoryDir,
+        workProductLedgerDir: path.join(memoryDir, "state", "work-product-ledger"),
+        creationMemoryEnabled: true,
+      },
+    } as never,
+  );
+
+  const action = root.children.get("engram")?.children.get("work-product-record")?.actionHandler;
+  assert.equal(typeof action, "function");
+
+  await action?.({
+    entryId: "wp-4",
+    recordedAt: "2026-03-07T23:25:00.000Z",
+    sessionKey: "agent:main",
+    source: "cli",
+    kind: "artifact",
+    entryAction: "created",
+    scope: "README.md",
+    summary: "Created a README artifact entry through CLI registration wiring.",
+  });
+
+  const status = await runWorkProductStatusCliCommand({
+    memoryDir,
+    creationMemoryEnabled: true,
+  });
+  assert.equal(status.entries.total, 1);
+  assert.equal(status.latestEntry?.entryId, "wp-4");
+  assert.equal(status.latestEntry?.action, "created");
 });

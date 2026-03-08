@@ -2547,7 +2547,10 @@ export function registerCli(api: CliApi, orchestrator: Orchestrator): void {
         .requiredOption("--session-key <sessionKey>", "Session key that created the work product")
         .requiredOption("--source <source>", "Entry source (tool_result|cli|system|manual)")
         .requiredOption("--kind <kind>", "Entry kind (artifact|file|record|report|workspace)")
-        .requiredOption("--action <action>", "Entry action (created|updated|deleted|referenced|published)")
+        .requiredOption(
+          "--entry-action <entryAction>",
+          "Entry action (created|updated|deleted|referenced|published)",
+        )
         .requiredOption("--scope <scope>", "Primary scope or identifier for the created work product")
         .requiredOption("--summary <summary>", "Human-readable summary of the work product")
         .option("--artifact-path <artifactPath>", "Optional path to the created artifact")
@@ -2570,7 +2573,7 @@ export function registerCli(api: CliApi, orchestrator: Orchestrator): void {
               sessionKey: String(options.sessionKey ?? ""),
               source: String(options.source ?? "") as WorkProductLedgerEntry["source"],
               kind: String(options.kind ?? "") as WorkProductLedgerEntry["kind"],
-              action: String(options.action ?? "") as WorkProductLedgerEntry["action"],
+              action: String(options.entryAction ?? "") as WorkProductLedgerEntry["action"],
               scope: String(options.scope ?? ""),
               summary: String(options.summary ?? ""),
               artifactPath: typeof options.artifactPath === "string" ? options.artifactPath : undefined,
