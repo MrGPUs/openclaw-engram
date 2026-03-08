@@ -1,6 +1,7 @@
 import path from "node:path";
 import { mkdir, writeFile } from "node:fs/promises";
 import { listJsonFiles, readJsonFile } from "./json-store.js";
+import { countRecallTokenOverlap, normalizeRecallTokens } from "./recall-tokenization.js";
 import {
   assertIsoRecordedAt,
   assertSafePathSegment,
@@ -52,6 +53,12 @@ export interface WorkProductLedgerStatus {
     path: string;
     error: string;
   }>;
+}
+
+export interface WorkProductLedgerSearchResult {
+  entry: WorkProductLedgerEntry;
+  score: number;
+  matchedFields: string[];
 }
 
 export function resolveWorkProductLedgerDir(memoryDir: string, overrideDir?: string): string {
@@ -136,6 +143,89 @@ async function readWorkProductLedgerEntries(options: {
     }
   }
   return { files, entries, invalidEntries };
+}
+
+function lexicalScoreWorkProductLedgerEntry(
+  entry: WorkProductLedgerEntry,
+  queryTokens: Set<string>,
+): { score: number; matchedFields: string[] } {
+  const weightedFields: Array<[string, string | undefined, number]> = [
+    ["scope", entry.scope, 4],
+    ["summary", entry.summary, 3],
+    ["artifactPath", entry.artifactPath, 3],
+    ["tags", entry.tags?.join(" "), 2],
+    ["entityRefs", entry.entityRefs?.join(" "), 2],
+    ["objectiveStateSnapshotRefs", entry.objectiveStateSnapshotRefs?.join(" "), 1],
+    ["kind", entry.kind, 1],
+    ["action", entry.action, 1],
+    ["source", entry.source, 1],
+  ];
+
+  let score = 0;
+  const matchedFields: string[] = [];
+  for (const [field, value, weight] of weightedFields) {
+    const matches = countRecallTokenOverlap(queryTokens, value, ["what", "can", "reuse"]);
+    if (matches > 0) matchedFields.push(field);
+    score += matches * weight;
+  }
+  return { score, matchedFields };
+}
+
+function scoreWorkProductLedgerEntry(
+  entry: WorkProductLedgerEntry,
+  lexicalScore: number,
+  sessionKey?: string,
+): number {
+  let score = lexicalScore;
+  if (entry.kind === "artifact" || entry.kind === "file") score += 1;
+  if (entry.action === "created" || entry.action === "updated" || entry.action === "published") score += 1;
+  if (sessionKey && entry.sessionKey === sessionKey) score += 1;
+
+  const recordedAtMs = Date.parse(entry.recordedAt);
+  if (Number.isFinite(recordedAtMs)) {
+    const ageHours = Math.max(0, (Date.now() - recordedAtMs) / 3_600_000);
+    score += 1 / (1 + ageHours);
+  }
+  return score;
+}
+
+export async function searchWorkProductLedgerEntries(options: {
+  memoryDir: string;
+  workProductLedgerDir?: string;
+  query: string;
+  maxResults: number;
+  sessionKey?: string;
+}): Promise<WorkProductLedgerSearchResult[]> {
+  const maxResults = Math.max(0, Math.floor(options.maxResults));
+  if (maxResults === 0) return [];
+
+  const { entries } = await readWorkProductLedgerEntries(options);
+  if (entries.length === 0) return [];
+
+  const queryTokens = new Set(normalizeRecallTokens(options.query, ["what", "can", "reuse"]));
+  if (queryTokens.size === 0) return [];
+
+  const scored = entries.map((entry) => {
+    const lexical = lexicalScoreWorkProductLedgerEntry(entry, queryTokens);
+    return {
+      entry,
+      matchedFields: lexical.matchedFields,
+      lexicalScore: lexical.score,
+      score: scoreWorkProductLedgerEntry(entry, lexical.score, options.sessionKey),
+    };
+  });
+
+  const filtered = scored.filter((result) => result.lexicalScore > 0);
+  filtered.sort((left, right) => {
+    if (right.score !== left.score) return right.score - left.score;
+    return right.entry.recordedAt.localeCompare(left.entry.recordedAt);
+  });
+
+  return filtered.slice(0, maxResults).map(({ entry, score, matchedFields }) => ({
+    entry,
+    score,
+    matchedFields,
+  }));
 }
 
 export async function getWorkProductLedgerStatus(options: {

@@ -74,6 +74,7 @@ import { searchTrustZoneRecords, type TrustZoneSearchResult } from "./trust-zone
 import { searchHarmonicRetrieval, type HarmonicRetrievalResult } from "./harmonic-retrieval.js";
 import { searchVerifiedEpisodes, type VerifiedEpisodeResult } from "./verified-recall.js";
 import { searchVerifiedSemanticRules, type VerifiedSemanticRuleResult } from "./semantic-rule-verifier.js";
+import { searchWorkProductLedgerEntries, type WorkProductLedgerSearchResult } from "./work-product-ledger.js";
 import { normalizeReplaySessionKey, type ReplayTurn } from "./replay/types.js";
 import type { MemorySummary } from "./types.js";
 import { chunkTranscriptEntries } from "./conversation-index/chunker.js";
@@ -2324,6 +2325,34 @@ export class Orchestrator {
       return results.length > 0 ? this.formatVerifiedSemanticRuleResults(results) : null;
     })();
 
+    const workProductsPromise = (async (): Promise<string | null> => {
+      const t0 = Date.now();
+      if (
+        !this.config.creationMemoryEnabled ||
+        !this.config.workProductRecallEnabled ||
+        !this.isRecallSectionEnabled("work-products", this.config.workProductRecallEnabled === true)
+      ) {
+        timings.workProducts = "skip";
+        return null;
+      }
+      const maxResults = this.getRecallSectionNumber("work-products", "maxResults") ?? 3;
+      if (maxResults <= 0) {
+        timings.workProducts = "skip(limit=0)";
+        return null;
+      }
+
+      const results = await searchWorkProductLedgerEntries({
+        memoryDir: this.config.memoryDir,
+        workProductLedgerDir: this.config.workProductLedgerDir,
+        query: retrievalQuery,
+        maxResults,
+        sessionKey,
+      });
+
+      timings.workProducts = `${Date.now() - t0}ms`;
+      return results.length > 0 ? this.formatWorkProductResults(results) : null;
+    })();
+
     // 2. QMD search (the slow part — runs in parallel with preamble)
     type QmdPhaseResult = {
       memoryResultsLists: QmdSearchResult[][];
@@ -2593,6 +2622,7 @@ export class Orchestrator {
       harmonicRetrievalSection,
       verifiedRecallSection,
       verifiedRulesSection,
+      workProductsSection,
       qmdResult,
       transcriptSection,
       compactionSection,
@@ -2611,6 +2641,7 @@ export class Orchestrator {
       harmonicRetrievalPromise,
       verifiedRecallPromise,
       verifiedRulesPromise,
+      workProductsPromise,
       qmdPromise,
       transcriptPromise,
       compactionPromise,
@@ -2707,6 +2738,10 @@ export class Orchestrator {
 
     if (verifiedRulesSection) {
       this.appendRecallSection(sectionBuckets, "verified-rules", verifiedRulesSection);
+    }
+
+    if (workProductsSection) {
+      this.appendRecallSection(sectionBuckets, "work-products", workProductsSection);
     }
 
     // 2. QMD results — post-process and format
@@ -5486,6 +5521,23 @@ export class Orchestrator {
     });
 
     return `## Harmonic Retrieval\n\n${lines.join("\n\n")}`;
+  }
+
+  private formatWorkProductResults(results: WorkProductLedgerSearchResult[]): string {
+    const lines = results.map(({ entry, matchedFields }, index) => {
+      const header = [
+        `[${index + 1}] ${entry.recordedAt.replace("T", " ").slice(0, 16)}`,
+        `${entry.kind}/${entry.action}`,
+        entry.sessionKey,
+      ].join(" | ");
+      const details = [entry.summary, `scope: ${entry.scope}`];
+      if (entry.artifactPath) details.push(`artifact: ${entry.artifactPath}`);
+      if (entry.tags && entry.tags.length > 0) details.push(`tags: ${entry.tags.join(", ")}`);
+      if (matchedFields.length > 0) details.push(`matched: ${matchedFields.join(", ")}`);
+      return `${header}\n${details.join("\n")}`;
+    });
+
+    return `## Work Products\n\n${lines.join("\n\n")}`;
   }
 
   private formatVerifiedEpisodeResults(results: VerifiedEpisodeResult[]): string {

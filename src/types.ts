@@ -244,6 +244,7 @@ export interface PluginConfig {
   semanticRuleVerificationEnabled: boolean;
   // Creation-memory foundation
   creationMemoryEnabled: boolean;
+  workProductRecallEnabled: boolean;
   workProductLedgerDir: string;
   // Local LLM Provider (v2.1)
   localLlmEnabled: boolean;

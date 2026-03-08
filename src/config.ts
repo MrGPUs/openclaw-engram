@@ -513,6 +513,7 @@ export function parseConfig(raw: unknown): PluginConfig {
     semanticRulePromotionEnabled: cfg.semanticRulePromotionEnabled === true,
     semanticRuleVerificationEnabled: cfg.semanticRuleVerificationEnabled === true,
     creationMemoryEnabled: cfg.creationMemoryEnabled === true,
+    workProductRecallEnabled: cfg.workProductRecallEnabled === true,
     workProductLedgerDir:
       typeof cfg.workProductLedgerDir === "string" && cfg.workProductLedgerDir.trim().length > 0
         ? cfg.workProductLedgerDir.trim()
@@ -1035,6 +1036,12 @@ function buildDefaultRecallPipeline(cfg: Record<string, unknown>): RecallSection
     {
       id: "verified-rules",
       enabled: cfg.semanticRuleVerificationEnabled === true,
+      maxResults: 3,
+      maxChars: 1800,
+    },
+    {
+      id: "work-products",
+      enabled: cfg.workProductRecallEnabled === true,
       maxResults: 3,
       maxChars: 1800,
     },

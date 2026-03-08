@@ -1,67 +1,53 @@
-# Theory: Creation Memory Starts With a Ledger
+# Theory: Creation Memory Needs Retrieval, Not Just Writes
 
 ## Problem
 
-Engram now has stronger evaluators, objective-state memory, causal memory,
-trust zones, harmonic retrieval, verified episodic recall, and promoted
-semantic rules. What it still lacks is a first-class answer to a basic
-operator question:
+PR23 solved the first half of creation memory by making work products explicit
+and durable. That was necessary, but it still left a practical gap:
 
-What did the agent actually create?
+How does an agent actually recover and reuse something it already made?
 
-That gap matters because recoverability is not only about recalling facts. It
-is also about recovering outputs, artifacts, records, and files the agent
-already produced.
+Until that answer exists, the creation-memory ledger is auditable but not yet
+operationally useful during recall.
 
 ## Operating Theory
 
-Creation memory should start the same way the other memory-OS tracks started:
+PR24 should stay just as disciplined as PR23:
 
-1. define a typed durable store
-2. gate it behind a flag
-3. make writes explicit and inspectable
-4. delay retrieval/reuse logic until the substrate is stable
-
-The right first substrate is a work-product ledger:
-
-- one record per created or updated output
-- dated, typed, and source-aware
-- easy to audit from disk
-- narrow enough to test deterministically
-
-This is better than jumping straight to recovery heuristics because later
-artifact reuse, commitment linking, and resume bundles all need a stable source
-of truth for what the agent made.
+1. reuse the existing typed ledger instead of inventing a second store
+2. gate retrieval behind a separate recall flag
+3. keep search lexical and inspectable before adding heavier reuse ranking
+4. surface recovered work products in their own recall section, not mixed into
+   generic semantic memory
 
 ## Strategy
 
-Keep PR23 intentionally small:
+Keep PR24 intentionally small:
 
-- add `creationMemoryEnabled`
-- add `workProductLedgerDir`
-- add a typed `work-product-ledger` store
-- add operator-facing record/status commands
-- do not yet blend this ledger into recall
-- do not yet infer commitments or resume bundles from it
+- add `workProductRecallEnabled`
+- add bounded search over work-product ledger entries
+- add `openclaw engram work-product-recall-search`
+- inject a dedicated `## Work Products` recall section
+- do not yet infer commitments or resume bundles from recovered entries
+- do not yet join the ledger to objective-state snapshots automatically
 
-That yields a real creation-memory foundation without pretending the whole
-recoverability track is solved.
+That yields the first real recovery path for created artifacts while keeping
+the creation-memory rollout modular.
 
 ## Key Discoveries
 
-- Objective-state memory solved "what changed in the world." Creation memory
-  solves the adjacent but different question "what did the agent produce."
-- A ledger entry should be explicit and source-aware, not inferred from fuzzy
-  search. The first rollout should privilege auditability over automation.
-- The operator-facing CLI write path is useful here because it gives PR23 a
-  real deterministic write surface without taking on transcript inference in
-  the same slice.
+- Creation memory becomes useful only when agents can ask "what did we already
+  make that I can reuse right now?"
+- The first recovery pass should favor explicit lexical matches over clever
+  heuristics. Operators need a recall surface they can reason about.
+- A dedicated `Work Products` section keeps recoverability legible and
+  benchmarkable without polluting other recall sections.
 
 ## Open Questions
 
-- Should PR24 derive artifact reuse candidates directly from the work-product
-  ledger, or join ledger entries with objective-state snapshots first?
-- Which work-product kinds need dedicated recovery scoring later:
-  `artifact`, `file`, `record`, `report`, or something richer?
-- When commitments and resume bundles arrive, should they reference ledger
-  entries directly or only through shared objective-state / entity refs?
+- Should later ranking prefer `artifact` and `file` entries over `record` or
+  `report`, or should that stay query-dependent?
+- When objective-state joins arrive, should recovery favor direct artifact-path
+  evidence or shared entity refs first?
+- Should commitment and resume-bundle slices reference recovered work products
+  directly, or should they only consume ledger IDs as lineage edges?

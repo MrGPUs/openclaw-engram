@@ -1205,6 +1205,11 @@
         "default": false,
         "description": "Enable creation-memory foundations, including the work-product ledger for explicit outputs agents create."
       },
+      "workProductRecallEnabled": {
+        "type": "boolean",
+        "default": false,
+        "description": "Inject prompt-relevant work-product ledger entries into recall context and expose artifact-recovery search tooling."
+      },
       "workProductLedgerDir": {
         "type": "string",
         "description": "Override the work-product ledger directory (defaults to {memoryDir}/state/work-product-ledger)."
@@ -2226,6 +2231,11 @@
       "label": "Creation Memory",
       "advanced": true,
       "help": "Enable creation-memory foundations, including the work-product ledger for explicit outputs agents create."
+    },
+    "workProductRecallEnabled": {
+      "label": "Work-Product Recall",
+      "advanced": true,
+      "help": "Inject prompt-relevant work-product ledger entries into recall context and expose artifact-recovery search tooling."
     },
     "workProductLedgerDir": {
       "label": "Work-Product Ledger Directory",

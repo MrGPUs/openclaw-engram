@@ -80,7 +80,9 @@ import {
 import {
   getWorkProductLedgerStatus,
   recordWorkProductLedgerEntry,
+  searchWorkProductLedgerEntries,
   type WorkProductLedgerEntry,
+  type WorkProductLedgerSearchResult,
   type WorkProductLedgerStatus,
 } from "./work-product-ledger.js";
 import {
@@ -829,6 +831,25 @@ export async function runWorkProductRecordCliCommand(options: {
     memoryDir: options.memoryDir,
     workProductLedgerDir: options.workProductLedgerDir,
     entry: options.entry,
+  });
+}
+
+export async function runWorkProductRecallSearchCliCommand(options: {
+  memoryDir: string;
+  workProductLedgerDir?: string;
+  creationMemoryEnabled: boolean;
+  workProductRecallEnabled: boolean;
+  query: string;
+  maxResults?: number;
+  sessionKey?: string;
+}): Promise<WorkProductLedgerSearchResult[]> {
+  if (!options.creationMemoryEnabled || !options.workProductRecallEnabled) return [];
+  return searchWorkProductLedgerEntries({
+    memoryDir: options.memoryDir,
+    workProductLedgerDir: options.workProductLedgerDir,
+    query: options.query,
+    maxResults: Math.max(1, Math.floor(options.maxResults ?? 3)),
+    sessionKey: options.sessionKey,
   });
 }
 
@@ -2585,6 +2606,31 @@ export function registerCli(api: CliApi, orchestrator: Orchestrator): void {
             },
           });
           console.log(JSON.stringify({ wrote: filePath !== null, filePath }, null, 2));
+          console.log("OK");
+        });
+
+      cmd
+        .command("work-product-recall-search")
+        .description("Preview work-product recovery candidates when creation-memory recall is enabled")
+        .argument("<query>", "Prompt-like query to evaluate against the work-product ledger")
+        .option("--max-results <count>", "Maximum number of work-product results to return", "3")
+        .option("--session-key <sessionKey>", "Optional session key to boost same-session work products")
+        .action(async (...args: unknown[]) => {
+          const query = typeof args[0] === "string" ? args[0] : "";
+          const options = (args[1] ?? {}) as Record<string, unknown>;
+          const maxResults = typeof options.maxResults === "string"
+            ? Number.parseInt(options.maxResults, 10)
+            : 3;
+          const results = await runWorkProductRecallSearchCliCommand({
+            memoryDir: orchestrator.config.memoryDir,
+            workProductLedgerDir: orchestrator.config.workProductLedgerDir,
+            creationMemoryEnabled: orchestrator.config.creationMemoryEnabled,
+            workProductRecallEnabled: orchestrator.config.workProductRecallEnabled,
+            query,
+            maxResults: Number.isFinite(maxResults) ? maxResults : 3,
+            sessionKey: typeof options.sessionKey === "string" ? options.sessionKey : undefined,
+          });
+          console.log(JSON.stringify(results, null, 2));
           console.log("OK");
         });
 
