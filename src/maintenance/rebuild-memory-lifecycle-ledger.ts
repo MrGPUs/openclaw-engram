@@ -52,6 +52,14 @@ function makeEvent(
   };
 }
 
+const LIFECYCLE_EVENT_SORT_ORDER: Record<MemoryLifecycleEventType, number> = {
+  created: 0,
+  updated: 1,
+  restored: 2,
+  superseded: 3,
+  archived: 4,
+};
+
 function buildEventsForMemory(memory: MemoryFile): MemoryLifecycleEvent[] {
   const events: MemoryLifecycleEvent[] = [];
   const created = memory.frontmatter.created;
@@ -117,7 +125,7 @@ export async function rebuildMemoryLifecycleLedger(
     .sort((a, b) => {
       if (a.memoryId !== b.memoryId) return a.memoryId.localeCompare(b.memoryId);
       if (a.timestamp !== b.timestamp) return a.timestamp.localeCompare(b.timestamp);
-      return a.eventType.localeCompare(b.eventType);
+      return LIFECYCLE_EVENT_SORT_ORDER[a.eventType] - LIFECYCLE_EVENT_SORT_ORDER[b.eventType];
     });
 
   let backupPath: string | undefined;

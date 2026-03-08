@@ -254,3 +254,67 @@ alpha
   assert.deepEqual(rows.map((row) => row.eventType), ["created", "updated"]);
   assert.equal(rows[0]?.memoryId, "fact-1");
 } );
+
+test("rebuildMemoryLifecycleLedger uses semantic event ordering for timestamp ties", async () => {
+  const memoryDir = await mkdtemp(path.join(os.tmpdir(), "engram-rebuild-memory-lifecycle-tie-order-"));
+  try {
+    await writeText(
+      memoryDir,
+      "archive/2026-03-08/fact-1.md",
+      `---
+id: fact-1
+category: fact
+created: 2026-03-08T00:00:00.000Z
+updated: 2026-03-08T00:00:00.000Z
+source: test
+confidence: 0.8
+confidenceTier: implied
+tags: ["alpha"]
+status: archived
+archivedAt: 2026-03-08T00:00:00.000Z
+---
+
+alpha
+`,
+    );
+    await writeText(
+      memoryDir,
+      "facts/2026-03-08/fact-2.md",
+      `---
+id: fact-2
+category: fact
+created: 2026-03-08T00:00:00.000Z
+updated: 2026-03-08T00:00:00.000Z
+source: test
+confidence: 0.8
+confidenceTier: implied
+tags: ["beta"]
+status: superseded
+supersededBy: fact-3
+supersededAt: 2026-03-08T00:00:00.000Z
+---
+
+beta
+`,
+    );
+
+    const result = await rebuildMemoryLifecycleLedger({
+      memoryDir,
+      dryRun: false,
+      now: new Date("2026-03-08T12:00:00.000Z"),
+    });
+
+    const rebuiltRaw = await readFile(result.outputPath, "utf-8");
+    const rows = rebuiltRaw.trim().split("\n").map((line) => JSON.parse(line) as any);
+    assert.deepEqual(
+      rows.filter((row) => row.memoryId === "fact-1").map((row) => row.eventType),
+      ["created", "archived"],
+    );
+    assert.deepEqual(
+      rows.filter((row) => row.memoryId === "fact-2").map((row) => row.eventType),
+      ["created", "superseded"],
+    );
+  } finally {
+    await rm(memoryDir, { recursive: true, force: true });
+  }
+});
