@@ -322,22 +322,7 @@ export function validateEvalRunSummary(raw: unknown): EvalRunSummary {
   if (!Number.isFinite(passedCases) || passedCases < 0) throw new Error("passedCases must be a non-negative number");
   if (!Number.isFinite(failedCases) || failedCases < 0) throw new Error("failedCases must be a non-negative number");
 
-  const metrics = isRecord(raw.metrics)
-    ? {
-        recallPrecisionAtK:
-          typeof raw.metrics.recallPrecisionAtK === "number" ? raw.metrics.recallPrecisionAtK : undefined,
-        actionOutcomeScore:
-          typeof raw.metrics.actionOutcomeScore === "number" ? raw.metrics.actionOutcomeScore : undefined,
-        objectiveStateCoverage:
-          typeof raw.metrics.objectiveStateCoverage === "number" ? raw.metrics.objectiveStateCoverage : undefined,
-        causalPathRecall:
-          typeof raw.metrics.causalPathRecall === "number" ? raw.metrics.causalPathRecall : undefined,
-        trustViolationRate:
-          typeof raw.metrics.trustViolationRate === "number" ? raw.metrics.trustViolationRate : undefined,
-        creationRecoveryScore:
-          typeof raw.metrics.creationRecoveryScore === "number" ? raw.metrics.creationRecoveryScore : undefined,
-      } satisfies EvalRunMetrics
-    : undefined;
+  const metrics = parseOptionalEvalRunMetrics(raw.metrics);
 
   return {
     schemaVersion: 1,
@@ -370,22 +355,7 @@ export function validateEvalBaselineSnapshot(raw: unknown): EvalBaselineSnapshot
       throw new Error(`benchmarks[${index}].passRate must be a number between 0 and 1`);
     }
 
-    const metrics = isRecord(item.metrics)
-      ? {
-          recallPrecisionAtK:
-            typeof item.metrics.recallPrecisionAtK === "number" ? item.metrics.recallPrecisionAtK : undefined,
-          actionOutcomeScore:
-            typeof item.metrics.actionOutcomeScore === "number" ? item.metrics.actionOutcomeScore : undefined,
-          objectiveStateCoverage:
-            typeof item.metrics.objectiveStateCoverage === "number" ? item.metrics.objectiveStateCoverage : undefined,
-          causalPathRecall:
-            typeof item.metrics.causalPathRecall === "number" ? item.metrics.causalPathRecall : undefined,
-          trustViolationRate:
-            typeof item.metrics.trustViolationRate === "number" ? item.metrics.trustViolationRate : undefined,
-          creationRecoveryScore:
-            typeof item.metrics.creationRecoveryScore === "number" ? item.metrics.creationRecoveryScore : undefined,
-        } satisfies EvalRunMetrics
-      : undefined;
+    const metrics = parseOptionalEvalRunMetrics(item.metrics);
 
     return {
       benchmarkId: assertString(item.benchmarkId, `benchmarks[${index}].benchmarkId`),
@@ -421,6 +391,18 @@ export function validateEvalBaselineSnapshot(raw: unknown): EvalBaselineSnapshot
     notes: typeof raw.notes === "string" && raw.notes.trim().length > 0 ? raw.notes.trim() : undefined,
     gitRef: typeof raw.gitRef === "string" && raw.gitRef.trim().length > 0 ? raw.gitRef.trim() : undefined,
   };
+}
+
+function parseOptionalEvalRunMetrics(raw: unknown): EvalRunMetrics | undefined {
+  if (!isRecord(raw)) return undefined;
+  return {
+    recallPrecisionAtK: typeof raw.recallPrecisionAtK === "number" ? raw.recallPrecisionAtK : undefined,
+    actionOutcomeScore: typeof raw.actionOutcomeScore === "number" ? raw.actionOutcomeScore : undefined,
+    objectiveStateCoverage: typeof raw.objectiveStateCoverage === "number" ? raw.objectiveStateCoverage : undefined,
+    causalPathRecall: typeof raw.causalPathRecall === "number" ? raw.causalPathRecall : undefined,
+    trustViolationRate: typeof raw.trustViolationRate === "number" ? raw.trustViolationRate : undefined,
+    creationRecoveryScore: typeof raw.creationRecoveryScore === "number" ? raw.creationRecoveryScore : undefined,
+  } satisfies EvalRunMetrics;
 }
 
 export function validateEvalShadowRecallRecord(raw: unknown): EvalShadowRecallRecord {
