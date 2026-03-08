@@ -6,6 +6,8 @@ import { Orchestrator, sanitizeSessionKeyForFilename, defaultWorkspaceDir } from
 import { registerTools } from "./tools.js";
 import { registerCli } from "./cli.js";
 import { recordObjectiveStateSnapshotsFromAgentMessages } from "./objective-state-writers.js";
+import { EngramAccessService } from "./access-service.js";
+import { EngramAccessHttpServer } from "./access-http.js";
 import { readFile, writeFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -14,6 +16,8 @@ import os from "node:os";
 const ENGRAM_REGISTERED_GUARD = "__openclawEngramRegistered";
 /** Tracks which api objects have already had hooks bound to prevent duplicate handlers. */
 const ENGRAM_HOOK_APIS = "__openclawEngramHookApis";
+const ENGRAM_ACCESS_SERVICE = "__openclawEngramAccessService";
+const ENGRAM_ACCESS_HTTP_SERVER = "__openclawEngramAccessHttpServer";
 
 // Workaround: Read config directly from openclaw.json since gateway may not pass it.
 // IMPORTANT: Do not log raw config contents (may include secrets).
@@ -116,6 +120,28 @@ export default {
     if ((globalThis as any).__openclawEngramTrace === undefined) {
       (globalThis as any).__openclawEngramTrace = undefined;
     }
+
+    const existingAccessService =
+      (globalThis as any)[ENGRAM_ACCESS_SERVICE] as EngramAccessService | undefined;
+    const accessService =
+      existingAccessService && (existingAccessService as EngramAccessService)
+        ? existingAccessService
+        : new EngramAccessService(orchestrator);
+    (globalThis as any)[ENGRAM_ACCESS_SERVICE] = accessService;
+
+    const existingAccessHttpServer =
+      (globalThis as any)[ENGRAM_ACCESS_HTTP_SERVER] as EngramAccessHttpServer | undefined;
+    const accessHttpServer =
+      existingAccessHttpServer && (existingAccessHttpServer as EngramAccessHttpServer)
+        ? existingAccessHttpServer
+        : new EngramAccessHttpServer({
+            service: accessService,
+            host: cfg.agentAccessHttp.host,
+            port: cfg.agentAccessHttp.port,
+            authToken: cfg.agentAccessHttp.authToken,
+            maxBodyBytes: cfg.agentAccessHttp.maxBodyBytes,
+          });
+    (globalThis as any)[ENGRAM_ACCESS_HTTP_SERVER] = accessHttpServer;
 
     // ========================================================================
     // HOOK: before_agent_start — Inject memory context
@@ -537,9 +563,25 @@ export default {
           );
         }
 
+        if (cfg.agentAccessHttp.enabled) {
+          try {
+            const status = await accessHttpServer.start();
+            log.info(`engram access HTTP ready at http://${status.host}:${status.port}`);
+          } catch (err) {
+            log.error("failed to start engram access HTTP server", err);
+          }
+        }
+
         log.info("engram memory system ready");
       },
-      stop: () => {
+      stop: async () => {
+        try {
+          await accessHttpServer.stop();
+        } catch (err) {
+          log.debug(`engram access HTTP stop failed: ${err}`);
+        }
+        delete (globalThis as any)[ENGRAM_ACCESS_HTTP_SERVER];
+        delete (globalThis as any)[ENGRAM_ACCESS_SERVICE];
         // Allow tools/CLI/service to re-register after a stop/reload cycle.
         (globalThis as any)[ENGRAM_REGISTERED_GUARD] = false;
         // Clear per-api hook tracking so hooks can be re-bound to fresh api objects.
