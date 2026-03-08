@@ -215,24 +215,22 @@ function parseFrontmatter(
 
   const conf = parseFloat(fm.confidence ?? "0.8");
 
-  const parseEscapedQuotedValue = (value: string): string => {
-    let out = "";
-    for (let i = 0; i < value.length; i++) {
-      const ch = value[i];
-      if (ch === "\\" && i + 1 < value.length) {
-        const next = value[i + 1];
-        if (next === "\\" || next === '"') {
-          out += next;
-          i++;
-          continue;
-        }
-        out += next;
-        i++;
-        continue;
-      }
-      out += ch;
+  const parseEscapedQuotedValue = (rawValue: string): string => {
+    const legacyValue = rawValue.replace(/\\"/g, '"');
+    const looksLikeLegacyPath =
+      !rawValue.includes("\\\\") &&
+      (/[A-Za-z]:\\[A-Za-z0-9._ -]+(?:\\[A-Za-z0-9._ -]+)+/.test(rawValue) ||
+        /\\[A-Za-z0-9._ -]+\\[A-Za-z0-9._ -]+/.test(rawValue));
+
+    if (looksLikeLegacyPath) {
+      return legacyValue;
     }
-    return out;
+
+    try {
+      return JSON.parse(`"${rawValue}"`) as string;
+    } catch {
+      return legacyValue;
+    }
   };
 
   // Parse lineage array if present
@@ -261,18 +259,11 @@ function parseFrontmatter(
     let reasons: string[] = [];
     const reasonsStr = fm.importanceReasons ?? "";
     if (reasonsStr.trim().startsWith("[") && reasonsStr.trim().endsWith("]")) {
-      try {
-        const parsed = JSON.parse(reasonsStr);
-        if (Array.isArray(parsed)) {
-          reasons = parsed.filter((item) => typeof item === "string") as string[];
-        }
-      } catch {
-        const reasonsMatch = reasonsStr.match(/\[(.*)]/);
-        if (reasonsMatch) {
-          reasons = reasonsMatch[1]
-            .split(/",\s*"/)
-            .map((r) => parseEscapedQuotedValue(r.replace(/^"|"$/g, "")))
-            .filter(Boolean);
+      const reasonMatches = reasonsStr.matchAll(/"((?:\\.|[^"\\])*)"/g);
+      for (const match of reasonMatches) {
+        const reason = parseEscapedQuotedValue(match[1]);
+        if (reason.length > 0) {
+          reasons.push(reason);
         }
       }
     }
