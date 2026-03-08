@@ -53,3 +53,21 @@ All notable changes to this project will be documented in this file.
 
   assert.equal(output, input);
 });
+
+test("promoteUnreleasedChangelog normalizes a leading v prefix in version input", () => {
+  const input = `# Changelog
+
+## [Unreleased]
+
+### Fixed
+- Fixed another release workflow bug.
+`;
+
+  const output = promoteUnreleasedChangelog(input, {
+    version: "v9.0.2",
+    date: "2026-03-08",
+  });
+
+  assert.match(output, /## \[v9\.0\.2\] - 2026-03-08/);
+  assert.doesNotMatch(output, /## \[vv9\.0\.2\]/);
+});

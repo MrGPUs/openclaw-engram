@@ -3,7 +3,7 @@ import path from "node:path";
 import { promoteUnreleasedChangelog } from "../src/release-changelog.js";
 
 async function main(): Promise<void> {
-  const version = process.argv[2];
+  const version = process.argv[2]?.replace(/^v/i, "");
   if (!version) {
     throw new Error("Usage: tsx scripts/promote-release-changelog.ts <version>");
   }
