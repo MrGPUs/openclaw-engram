@@ -7,11 +7,13 @@ import {
   getWorkProductLedgerStatus,
   recordWorkProductLedgerEntry,
   resolveWorkProductLedgerDir,
+  searchWorkProductLedgerEntries,
   validateWorkProductLedgerEntry,
 } from "../src/work-product-ledger.js";
 import {
   registerCli,
   runWorkProductRecordCliCommand,
+  runWorkProductRecallSearchCliCommand,
   runWorkProductStatusCliCommand,
 } from "../src/cli.js";
 
@@ -234,4 +236,96 @@ test("work-product-record CLI wiring uses entryAction instead of Commander's res
   assert.equal(status.entries.total, 1);
   assert.equal(status.latestEntry?.entryId, "wp-4");
   assert.equal(status.latestEntry?.action, "created");
+});
+
+test("searchWorkProductLedgerEntries returns artifact reuse candidates with lexical matches", async () => {
+  const memoryDir = await mkdtemp(path.join(os.tmpdir(), "engram-work-product-search-"));
+
+  await recordWorkProductLedgerEntry({
+    memoryDir,
+    entry: {
+      schemaVersion: 1,
+      entryId: "wp-readme-guide",
+      recordedAt: "2026-03-07T23:26:00.000Z",
+      sessionKey: "agent:main",
+      source: "cli",
+      kind: "artifact",
+      action: "created",
+      scope: "README.md",
+      summary: "Created the public README contributor guide for open source reuse.",
+      artifactPath: "README.md",
+      tags: ["docs", "oss"],
+    },
+  });
+
+  await recordWorkProductLedgerEntry({
+    memoryDir,
+    entry: {
+      schemaVersion: 1,
+      entryId: "wp-internal-report",
+      recordedAt: "2026-03-07T23:27:00.000Z",
+      sessionKey: "agent:ops",
+      source: "cli",
+      kind: "report",
+      action: "created",
+      scope: "incident-report.md",
+      summary: "Created the internal incident report for overnight ops.",
+      artifactPath: "incident-report.md",
+      tags: ["ops"],
+    },
+  });
+
+  const results = await searchWorkProductLedgerEntries({
+    memoryDir,
+    query: "reuse the open source README guide",
+    maxResults: 3,
+    sessionKey: "agent:main",
+  });
+
+  assert.equal(results.length, 1);
+  assert.equal(results[0]?.entry.entryId, "wp-readme-guide");
+  assert.match(results[0]?.matchedFields.join(",") ?? "", /summary|scope|artifactPath|tags/i);
+  assert.ok((results[0]?.score ?? 0) > 0);
+});
+
+test("runWorkProductRecallSearchCliCommand is gated by creation and recall flags", async () => {
+  const memoryDir = await mkdtemp(path.join(os.tmpdir(), "engram-work-product-recall-cli-"));
+
+  await recordWorkProductLedgerEntry({
+    memoryDir,
+    entry: {
+      schemaVersion: 1,
+      entryId: "wp-reuse-snippet",
+      recordedAt: "2026-03-07T23:28:00.000Z",
+      sessionKey: "agent:main",
+      source: "cli",
+      kind: "artifact",
+      action: "created",
+      scope: "docs/getting-started.md",
+      summary: "Created a getting-started snippet for future reuse.",
+      artifactPath: "docs/getting-started.md",
+      tags: ["docs", "reuse"],
+    },
+  });
+
+  const disabled = await runWorkProductRecallSearchCliCommand({
+    memoryDir,
+    creationMemoryEnabled: true,
+    workProductRecallEnabled: false,
+    query: "reuse getting-started snippet",
+    maxResults: 2,
+    sessionKey: "agent:main",
+  });
+  assert.deepEqual(disabled, []);
+
+  const enabled = await runWorkProductRecallSearchCliCommand({
+    memoryDir,
+    creationMemoryEnabled: true,
+    workProductRecallEnabled: true,
+    query: "reuse getting-started snippet",
+    maxResults: 2,
+    sessionKey: "agent:main",
+  });
+  assert.equal(enabled.length, 1);
+  assert.equal(enabled[0]?.entry.entryId, "wp-reuse-snippet");
 });
