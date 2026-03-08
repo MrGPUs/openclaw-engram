@@ -224,12 +224,13 @@ The baseline delta reporter:
 
 The CI gate:
 
-- compares two eval-store roots
+- uses the named stored baseline snapshot `tests/fixtures/eval-ci/store/baselines/required-main.json`
+- reads that snapshot from the base-branch checkout during PR validation
+- compares the candidate fixture store against the required baseline snapshot instead of diffing two ad hoc run sets
 - fails when candidate artifacts are invalid
 - fails when a benchmark with a latest completed run disappears from candidate
 - fails when pass rate or shared metrics regress
 - currently treats `trustViolationRate` as lower-is-better and other shared metrics as higher-is-better
-- is suitable for comparing checked-in eval snapshots today, before benchmark execution is fully automated
 
 ## Rollout Guidance
 

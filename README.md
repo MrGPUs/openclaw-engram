@@ -33,6 +33,7 @@ AI agents forget everything between conversations. Engram fixes that.
 - **Benchmark-first roadmap** — Engram now has an evaluation harness with live shadow recall recording and a CI benchmark delta gate, so memory improvements can be measured and regression-checked instead of argued from anecdotes.
 - **Baseline snapshot discipline** — Engram can now, when `benchmarkBaselineSnapshotsEnabled` is enabled, capture typed baseline snapshots of the latest completed benchmark runs so later PR delta reporting can compare candidates against a stable stored reference instead of an ad hoc branch state.
 - **Named baseline delta reporting** — Engram can now, when `benchmarkDeltaReporterEnabled` is enabled, compare the current eval store against a stored baseline snapshot, emit a machine-readable delta report plus markdown summary, and fail fast when a candidate regresses a benchmark that previously passed.
+- **Required CI baseline gate** — Engram's `eval-benchmark-gate` workflow now reads a named stored baseline snapshot from the base branch fixture store and blocks merges when the candidate branch regresses relative to that required baseline.
 - **Objective-state recall** — Engram can now store normalized file, process, and tool outcomes and, when `objectiveStateRecallEnabled` is enabled, inject the most relevant objective-state snapshots back into recall context as a separate `Objective State` section.
 - **Causal trajectory graph foundation** — Engram can now persist typed `goal -> action -> observation -> outcome -> follow-up` chains when `causalTrajectoryMemoryEnabled` is enabled and, with `actionGraphRecallEnabled`, emit deterministic action-conditioned edges into the causal graph for later trajectory-aware retrieval.
 - **Causal trajectory recall** — Engram can now, when `causalTrajectoryRecallEnabled` is enabled, inject prompt-relevant causal chains back into recall context as a separate `Causal Trajectories` section with lightweight match explainability.
@@ -215,6 +216,10 @@ Key settings:
 | `evalShadowModeEnabled` | `false` | Record live recall decisions to the eval store without changing injected output |
 | `benchmarkBaselineSnapshotsEnabled` | `false` | Enable versioned baseline snapshot artifacts for the latest completed benchmark runs |
 | `benchmarkDeltaReporterEnabled` | `false` | Enable named-baseline delta reports against the current eval store |
+
+The repo's required benchmark check uses the committed fixture snapshot at
+`tests/fixtures/eval-ci/store/baselines/required-main.json` as the stable
+release baseline for PR gating.
 | `evalStoreDir` | `{memoryDir}/state/evals` | Root directory for benchmark packs, run summaries, and shadow recall records |
 | `objectiveStateMemoryEnabled` | `false` | Enable the objective-state memory foundation for normalized world/tool state snapshots |
 | `objectiveStateSnapshotWritesEnabled` | `false` | Permit objective-state snapshot writers to persist typed state records |
