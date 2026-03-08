@@ -99,6 +99,37 @@ test("StorageManager emits created updated and archived lifecycle events for mem
   }
 });
 
+test("archiveMemory fails open when lifecycle ledger append throws after archive move", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "openclaw-engram-memory-lifecycle-archive-fail-open-"));
+  try {
+    const storage = new StorageManager(dir);
+    const id = await storage.writeMemory("fact", "Archive me", {
+      source: "test",
+      tags: ["archive"],
+    });
+    const memories = await storage.readAllMemories();
+    const memory = memories.find((entry) => entry.frontmatter.id === id);
+    assert.ok(memory);
+
+    const originalAppend = (storage as any).appendGeneratedMemoryLifecycleEvent;
+    let throwOnce = true;
+    (storage as any).appendGeneratedMemoryLifecycleEvent = async (...args: unknown[]) => {
+      if (throwOnce) {
+        throwOnce = false;
+        throw new Error("simulated ledger failure");
+      }
+      return originalAppend.apply(storage, args);
+    };
+
+    const archivedPath = await storage.archiveMemory(memory!);
+    assert.equal(typeof archivedPath, "string");
+    await stat(archivedPath as string);
+    await assert.rejects(() => stat(memory!.path));
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("rebuildMemoryLifecycleLedger dry-run computes inferred events without writing output", async () => {
   const memoryDir = await mkdtemp(path.join(os.tmpdir(), "engram-rebuild-memory-lifecycle-dry-"));
   await writeText(

@@ -1377,14 +1377,18 @@ export class StorageManager {
       // Write to archive location first, then remove original
       await writeFile(destPath, fileContent, "utf-8");
       await unlink(memory.path);
-      await this.appendGeneratedMemoryLifecycleEvent({
-        memoryId: memory.frontmatter.id,
-        eventType: "archived",
-        timestamp: updatedFm.archivedAt ?? updatedFm.updated,
-        actor: "storage.archiveMemory",
-        before: this.summarizeLifecycleState(memory.frontmatter, memory.path),
-        after: this.summarizeLifecycleState(updatedFm, destPath),
-      });
+      try {
+        await this.appendGeneratedMemoryLifecycleEvent({
+          memoryId: memory.frontmatter.id,
+          eventType: "archived",
+          timestamp: updatedFm.archivedAt ?? updatedFm.updated,
+          actor: "storage.archiveMemory",
+          before: this.summarizeLifecycleState(memory.frontmatter, memory.path),
+          after: this.summarizeLifecycleState(updatedFm, destPath),
+        });
+      } catch (appendErr) {
+        log.warn(`archived memory ${memory.frontmatter.id} but failed to append lifecycle event: ${appendErr}`);
+      }
       this.bumpMemoryStatusVersion();
 
       log.debug(`archived memory ${memory.frontmatter.id} → ${destPath}`);
