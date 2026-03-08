@@ -66,10 +66,15 @@ export function validateResumeBundle(raw: unknown): ResumeBundle {
     throw new Error("source must be one of tool_result|cli|system|manual");
   }
 
+  const recordedAt = assertIsoRecordedAt(assertString(raw.recordedAt, "recordedAt"));
+  if (!Number.isFinite(Date.parse(recordedAt))) {
+    throw new Error("recordedAt must be an ISO timestamp");
+  }
+
   return {
     schemaVersion: 1,
     bundleId: assertSafePathSegment(assertString(raw.bundleId, "bundleId"), "bundleId"),
-    recordedAt: assertIsoRecordedAt(assertString(raw.recordedAt, "recordedAt")),
+    recordedAt,
     sessionKey: assertString(raw.sessionKey, "sessionKey"),
     source: source as ResumeBundleSource,
     scope: assertString(raw.scope, "scope"),

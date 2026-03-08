@@ -60,6 +60,21 @@ test("validateResumeBundle reports bundleId field name on invalid ids", () => {
   );
 });
 
+test("validateResumeBundle rejects date-like timestamps that Date.parse cannot read", () => {
+  assert.throws(
+    () => validateResumeBundle({
+      schemaVersion: 1,
+      bundleId: "resume-bad-date",
+      recordedAt: "2026-13-40T00:00:00Z",
+      sessionKey: "agent:main",
+      source: "cli",
+      scope: "bad date",
+      summary: "This bundle carries a malformed timestamp.",
+    }),
+    /recordedAt must be an ISO timestamp/,
+  );
+});
+
 test("recordResumeBundle persists bundles into dated storage", async () => {
   const memoryDir = await mkdtemp(path.join(os.tmpdir(), "engram-resume-bundle-record-"));
   const filePath = await recordResumeBundle({
@@ -106,6 +121,31 @@ test("resume bundle status reports valid and invalid bundles", async () => {
     "invalid.json",
   );
   await writeFile(invalidPath, JSON.stringify({ schemaVersion: 1, bundleId: "" }, null, 2), "utf8");
+  const malformedDatePath = path.join(
+    memoryDir,
+    "state",
+    "resume-bundles",
+    "bundles",
+    "2026-03-08",
+    "bad-date.json",
+  );
+  await writeFile(
+    malformedDatePath,
+    JSON.stringify(
+      {
+        schemaVersion: 1,
+        bundleId: "resume-bad-date",
+        recordedAt: "2026-13-40T00:00:00Z",
+        sessionKey: "agent:main",
+        source: "system",
+        scope: "bad date",
+        summary: "This malformed timestamp should be rejected.",
+      },
+      null,
+      2,
+    ),
+    "utf8",
+  );
 
   const status = await getResumeBundleStatus({
     memoryDir,
@@ -113,12 +153,14 @@ test("resume bundle status reports valid and invalid bundles", async () => {
   });
 
   assert.equal(status.enabled, true);
-  assert.equal(status.bundles.total, 2);
+  assert.equal(status.bundles.total, 3);
   assert.equal(status.bundles.valid, 1);
-  assert.equal(status.bundles.invalid, 1);
+  assert.equal(status.bundles.invalid, 2);
   assert.equal(status.bundles.bySource.system, 1);
   assert.equal(status.latestBundle?.bundleId, "resume-pr27-2");
-  assert.match(status.invalidBundles[0]?.path ?? "", /invalid\.json$/);
+  const invalidPaths = status.invalidBundles.map((entry) => entry.path);
+  assert.equal(invalidPaths.some((candidate) => /invalid\.json$/.test(candidate)), true);
+  assert.equal(invalidPaths.some((candidate) => /bad-date\.json$/.test(candidate)), true);
 });
 
 test("resume-bundle CLI commands write and report only when the feature is enabled", async () => {
