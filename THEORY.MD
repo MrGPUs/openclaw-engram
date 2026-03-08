@@ -1,57 +1,62 @@
-# Theory: Resume Bundles Need a Contract Before They Need a Builder
+# Theory: Resume Bundles Should Reuse Existing Memory, Not Invent a New Recovery Stack
 
 ## Problem
 
-Creation memory now has the two raw ingredients a recovery system needs:
+PR27 gave Engram a typed resume-bundle format, but that format was still an
+empty shell. A crash-recovery system is only useful once the bundle can be
+assembled from real state the agent already captured during work.
 
-- a typed work-product ledger for what the agent created
-- a typed commitment ledger for what the agent still owes
-
-What it still lacks is the recovery container itself. Without a stable resume
-bundle contract, later automation would have to invent its own ad hoc shape for
-handoff state and would make PR28 harder to verify or benchmark.
+The risk in PR28 is overreach. If the slice tries to build a full restore
+engine, new transcript summarization, or another parallel recovery store, it
+will sprawl and become hard to verify. The roadmap only needs one thing here:
+deterministic bundle assembly from the stores Engram already owns.
 
 ## Operating Theory
 
-The right PR27 shape is format first.
+Engram already has the ingredients for a compact handoff bundle:
 
-Resume bundles should become a deterministic, typed store before Engram starts
-assembling them from transcripts, objective-state snapshots, work products, or
-commitments.
+- transcript recovery health from `TranscriptManager.getRecoverySummary(...)`
+- recent objective-state snapshots for what changed in the world
+- recent work-product ledger entries for what was created
+- open commitment ledger entries for what still needs to happen
 
-That means:
-
-- define a bundle schema with explicit scope, summary, and linked refs
-- persist bundles into dated storage like the other creation-memory ledgers
-- expose operator-facing record and status commands
-- stop short of any builder or recovery injection logic
+That means PR28 should not invent new sources of truth. It should compose these
+existing stores into one bounded `ResumeBundle`, keep the session boundary
+strict, and fail open on invalid stored artifacts the same way the status tools
+do.
 
 ## Strategy
 
-PR27 stays narrow by shipping only the contract and tooling:
+Keep the builder deterministic and operator-facing:
 
-1. config flags for enabling resume-bundle storage
-2. a typed `ResumeBundle` schema and deterministic file layout
-3. status and write commands so operators can inspect and exercise the format
+1. read only the requested `sessionKey`
+2. bound each linked store by recency and a small fixed cap
+3. turn transcript health into bundle facts and risk flags
+4. turn open commitments into `nextActions`
+5. persist the built bundle through a dedicated CLI command
 
-This keeps PR27 reviewable and leaves PR28 with one focused job: populate the
-bundle from live session state instead of also debating what the bundle should
-look like.
+This keeps the slice reviewable. The builder proves Engram can reconstruct a
+restart-safe handoff from current memory primitives, while later slices can
+decide how recall or restore should consume that bundle.
 
 ## Key Discoveries
 
-- Resume bundles fit the same rollout discipline as the rest of the memory OS:
-  format first, then builders, then recovery consumers.
-- The format needs linked refs to objective-state snapshots, work products, and
-  commitments on day one, even if this slice does not auto-populate them yet.
-- A bundle format can be valuable before automation because it gives operators a
-  stable handoff shell and gives CI something deterministic to validate later.
+- The transcript layer already exposes the right compact recovery signal.
+  PR28 does not need a new parser; it can reuse `getRecoverySummary(...)`.
+- The creation-memory stores already carry the right semantics for recovery:
+  work products answer "what did we create?" and commitments answer "what is
+  still owed?".
+- Disabled-mode behavior matters as much as happy-path behavior. PR27 showed
+  that a feature flag is only real if the CLI path also short-circuits before
+  any storage walk.
 
 ## Open Questions
 
-- Should PR28 emit one bundle per session checkpoint, or should it replace the
-  latest bundle for a session key?
-- Should future recovery consumers prefer bundle `nextActions` directly, or
-  recompute priorities from linked ledgers at restore time?
-- When resume-bundle recall eventually lands, should bundles appear as a
-  dedicated recall section or stay strictly in operator tooling?
+- Should the next slice keep only the latest bundle per session key, or retain
+  a short sequence of checkpoints for recovery history?
+- When resume bundles are eventually recalled, should `nextActions` remain a
+  direct operator-authored list or be recomputed from current commitments at
+  read time?
+- Should future restore consumers treat transcript recovery health as a hard
+  gate, or as one signal among several when deciding whether a session can
+  resume safely?
