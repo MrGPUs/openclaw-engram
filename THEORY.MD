@@ -1,71 +1,68 @@
-# Theory: Stored Baselines Only Matter If PRs Can Read Them
+# Theory: Benchmark Discipline Becomes Real At The Required Check
 
 ## Problem
 
-PR32 gave Engram a durable baseline artifact, but that alone does not create
-benchmark-gated release discipline. A stored snapshot is useful only if the
-next PR slice can consume it directly and turn it into an explicit pass/fail
-signal for a candidate build.
+PR32 created durable baseline snapshots.
+PR33 made those snapshots comparable against current candidate runs.
 
-Without that, the evaluation harness still depends on ad hoc store-to-store
-comparisons and operator choreography. The baseline exists, but the review loop
-still cannot ask the simple question it needs to ask: how does this candidate
-compare to the named benchmark baseline we decided to trust?
+That still left one gap: the required PR gate was comparing two fixture stores
+directly, not comparing a candidate branch against the named baseline snapshot
+the repo had chosen to trust.
+
+If that gap stayed open, Engram could claim benchmark-gated release discipline
+without actually enforcing it at merge time.
 
 ## Operating Theory
 
-PR33 should not invent a second evaluation system. The right move is to reuse
-the same bounded comparison primitives that already power the CI gate:
+PR34 should operationalize the stored-baseline model, not replace it.
 
-- latest completed run per benchmark
-- pass-rate deltas
-- shared metric deltas
-- fail-closed handling for invalid candidate artifacts
+The cleanest rollout is:
 
-The new work is not another comparison engine. It is a bridge between two
-existing contracts:
+1. keep the existing required workflow and check name
+2. read the named baseline snapshot from the base branch checkout
+3. allow a one-time candidate fallback only when the base branch has not adopted
+   the named baseline yet
+4. compare the candidate branch fixture runs against that stored baseline
+5. fail the PR when candidate artifacts are invalid or benchmark outcomes regress
 
-1. the stored `EvalBaselineSnapshot` artifact from PR32
-2. the candidate latest-run view already used by PR4's CI gate
+This preserves the key distinction introduced in PR32 and PR33:
 
-If that bridge is typed, operator-facing, and feature-flagged, then PR34 can
-wire it into required CI without changing the report contract again.
+- the baseline is deliberate and named
+- the candidate view is the latest completed run set
+- the merge gate compares those two contracts directly
 
 ## Strategy
 
-Keep PR33 narrow and reviewable:
+Keep the slice small and reviewable:
 
-- add one flag: `benchmarkDeltaReporterEnabled`
-- add one typed report: `EvalBaselineDeltaReport`
-- add one CLI command: `openclaw engram benchmark-baseline-report --snapshot-id <id>`
-- emit both JSON and markdown from the same source of truth
+- add one stored-baseline CI helper
+- point the existing `eval-benchmark-gate` workflow at it
+- commit one explicit required baseline fixture snapshot:
+  `tests/fixtures/eval-ci/store/baselines/required-main.json`
+- document that snapshot as the PR-gating contract
 
-The command should compare a named stored baseline snapshot against the current
-eval store, not against another branch directory. That preserves the point of
-the baseline artifact: deliberate, reusable release anchors instead of transient
-workspace state.
+The important constraint is continuity. The workflow name should stay stable so
+branch protection does not change, while the comparison semantics underneath it
+become stricter and more intentional.
 
 ## Key Discoveries
 
-- The existing CI-gate comparison path already has the right semantics for
-  regressions and improvements. PR33 only needs to swap the base side from
-  "latest runs in another store" to "benchmarks recorded in one named snapshot."
-- Because the baseline snapshot lives in the same eval store as later candidate
-  runs, a benchmark is only truly "missing" if its latest candidate run is no
-  longer present after the snapshot is taken. That storage-model nuance needed a
-  regression test so the report does not silently overstate coverage.
-- Markdown output belongs in the report contract itself, not in a separate
-  formatter script, because PR comments and release notes will want the same
-  operator-facing summary that the CLI prints locally.
+- PR34 does not need another public operator command. The missing piece is a CI
+  path that reads a base-branch baseline snapshot while still evaluating the
+  candidate branch run artifacts.
+- Using a committed named snapshot is better than an implicit "latest from
+  base" rule because it makes the release baseline auditable and reviewable in
+  the repo.
+- The rollout PR itself is a bootstrap edge case: `main` cannot provide the new
+  required snapshot until the PR lands. That needs an explicit, visible
+  candidate fallback rather than a silent failure or a one-off manual merge.
+- The existing `EvalBaselineDeltaReport` contract from PR33 was already strong
+  enough for rollout. The required check only needed a thin adapter that swaps
+  the source of the baseline snapshot from "current store" to "base branch
+  store."
 
-## Open Questions
+## Remaining Question
 
-- PR34 still needs to decide whether required CI should compare against one
-  explicit snapshot id or a repo-level default baseline pointer.
-- The baseline delta report currently treats invalid candidate baseline files as
-  regressions too. That is conservative and useful today, but later slices may
-  want a clearer distinction between "comparison baseline is unreadable" and
-  "candidate benchmark behavior regressed."
-- If Engram later supports multiple benchmark families with different rollout
-  cadences, the project may need scoped baselines instead of one flat snapshot
-  namespace.
+- After PR34 lands, the roadmap program is functionally complete, but the next
+  improvement path would be automating how the `required-main` fixture snapshot
+  gets refreshed so baseline promotion is itself deliberate and benchmark-backed.

@@ -195,6 +195,11 @@ export interface EvalBaselineDeltaReport {
   markdownReport: string;
 }
 
+export interface EvalStoredBaselineCiGateReport extends EvalBaselineDeltaReport {
+  baseRootDir: string;
+  baselineResolvedFrom: "base" | "candidate";
+}
+
 export interface EvalBaselineSnapshotBenchmark {
   benchmarkId: string;
   runId: string;
@@ -991,6 +996,64 @@ export async function runEvalBaselineDeltaReport(options: {
   if (!baselineSnapshot) {
     throw new Error(`benchmark baseline snapshot not found: ${snapshotId}`);
   }
+
+  return buildEvalBaselineDeltaReport({
+    baselineSnapshot,
+    candidateSnapshot,
+  });
+}
+
+export async function runEvalStoredBaselineCiGate(options: {
+  baseMemoryDir?: string;
+  baseEvalStoreDir: string;
+  candidateMemoryDir?: string;
+  candidateEvalStoreDir: string;
+  snapshotId: string;
+}): Promise<EvalStoredBaselineCiGateReport> {
+  const snapshotId = assertSafePathSegment(assertString(options.snapshotId, "snapshotId"), "snapshotId");
+  const baseRootDir = resolveEvalStoreDir(options.baseMemoryDir ?? options.baseEvalStoreDir, options.baseEvalStoreDir);
+  const candidateRootDir = resolveEvalStoreDir(
+    options.candidateMemoryDir ?? options.candidateEvalStoreDir,
+    options.candidateEvalStoreDir,
+  );
+  const [baseSnapshot, candidateSnapshot] = await Promise.all([
+    collectEvalStoreSnapshot({
+      rootDir: baseRootDir,
+      enabled: true,
+      shadowModeEnabled: true,
+      baselineSnapshotsEnabled: true,
+      memoryRedTeamBenchEnabled: true,
+    }),
+    collectEvalStoreSnapshot({
+      rootDir: candidateRootDir,
+      enabled: true,
+      shadowModeEnabled: true,
+      baselineSnapshotsEnabled: true,
+      memoryRedTeamBenchEnabled: true,
+    }),
+  ]);
+  const baselineSnapshot =
+    baseSnapshot.baselines.find((snapshot) => snapshot.snapshotId === snapshotId) ??
+    candidateSnapshot.baselines.find((snapshot) => snapshot.snapshotId === snapshotId);
+  if (!baselineSnapshot) {
+    throw new Error(`benchmark baseline snapshot not found: ${snapshotId}`);
+  }
+
+  return {
+    baseRootDir,
+    baselineResolvedFrom: baseSnapshot.baselines.some((snapshot) => snapshot.snapshotId === snapshotId) ? "base" : "candidate",
+    ...buildEvalBaselineDeltaReport({
+      baselineSnapshot,
+      candidateSnapshot,
+    }),
+  };
+}
+
+function buildEvalBaselineDeltaReport(options: {
+  baselineSnapshot: EvalBaselineSnapshot;
+  candidateSnapshot: EvalStoreSnapshot;
+}): EvalBaselineDeltaReport {
+  const { baselineSnapshot, candidateSnapshot } = options;
 
   const regressions: string[] = [];
   const improvements: string[] = [];

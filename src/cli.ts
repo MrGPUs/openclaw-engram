@@ -51,9 +51,11 @@ import {
   type EvalBaselineDeltaReport,
   type EvalBenchmarkPackSummary,
   type EvalCiGateReport,
+  type EvalStoredBaselineCiGateReport,
   type EvalHarnessStatus,
   runEvalBaselineDeltaReport,
   runEvalBenchmarkCiGate,
+  runEvalStoredBaselineCiGate,
   validateEvalBenchmarkPack,
 } from "./evals.js";
 import { analyzeGraphHealth, type GraphHealthReport } from "./graph.js";
@@ -725,6 +727,18 @@ export async function runBenchmarkCiGateCliCommand(options: {
   return runEvalBenchmarkCiGate({
     baseEvalStoreDir: options.baseEvalStoreDir,
     candidateEvalStoreDir: options.candidateEvalStoreDir,
+  });
+}
+
+export async function runBenchmarkStoredBaselineCiGateCliCommand(options: {
+  baseEvalStoreDir: string;
+  candidateEvalStoreDir: string;
+  snapshotId: string;
+}): Promise<EvalStoredBaselineCiGateReport> {
+  return runEvalStoredBaselineCiGate({
+    baseEvalStoreDir: options.baseEvalStoreDir,
+    candidateEvalStoreDir: options.candidateEvalStoreDir,
+    snapshotId: options.snapshotId,
   });
 }
 
