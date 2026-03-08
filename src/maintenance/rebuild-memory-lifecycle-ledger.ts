@@ -72,12 +72,14 @@ function buildEventsForMemory(memory: MemoryFile): MemoryLifecycleEvent[] {
   const updated = memory.frontmatter.updated;
   const archivedAt = memory.frontmatter.archivedAt;
   const supersededAt = memory.frontmatter.supersededAt;
+  const effectiveArchivedAt =
+    archivedAt ?? (memory.frontmatter.status === "archived" && updated ? updated : undefined);
 
   events.push(makeEvent(memory, "created", created));
   if (
     updated &&
     updated !== created &&
-    updated !== archivedAt &&
+    updated !== effectiveArchivedAt &&
     updated !== supersededAt
   ) {
     events.push(makeEvent(memory, "updated", updated));
@@ -85,8 +87,8 @@ function buildEventsForMemory(memory: MemoryFile): MemoryLifecycleEvent[] {
   if (supersededAt) {
     events.push(makeEvent(memory, "superseded", supersededAt));
   }
-  if (archivedAt || (memory.frontmatter.status === "archived" && updated)) {
-    events.push(makeEvent(memory, "archived", archivedAt ?? updated));
+  if (effectiveArchivedAt) {
+    events.push(makeEvent(memory, "archived", effectiveArchivedAt));
   }
 
   return events;
