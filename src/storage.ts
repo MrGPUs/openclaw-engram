@@ -32,6 +32,7 @@ import type {
   MemoryLifecycleEvent,
   MemoryLifecycleEventType,
   MemoryLifecycleStateSummary,
+  MemoryProjectionCurrentState,
   BehaviorSignalEvent,
   MemorySummary,
   MetaState,
@@ -42,6 +43,11 @@ import type {
   FileHygieneConfig,
 } from "./types.js";
 import { confidenceTier, SPECULATIVE_TTL_DAYS } from "./types.js";
+import {
+  readProjectedMemoryState,
+  readProjectedMemoryTimeline,
+} from "./memory-projection-store.js";
+import { sortMemoryLifecycleEvents } from "./memory-lifecycle-ledger-utils.js";
 import {
   closeContinuityIncidentRecord,
   createContinuityIncidentRecord,
@@ -351,6 +357,29 @@ function parseFrontmatter(
   }
 
   return result;
+}
+
+function normalizeFrontmatterForPath(frontmatter: MemoryFrontmatter, filePath: string): MemoryFrontmatter {
+  if (/[\\/]archive[\\/]/.test(filePath) && (!frontmatter.status || frontmatter.status === "active")) {
+    return {
+      ...frontmatter,
+      status: "archived",
+    };
+  }
+
+  return frontmatter;
+}
+
+function inferCurrentStateStatus(
+  frontmatter: MemoryFrontmatter,
+  filePath: string,
+  fallbackStatus: MemoryStatus,
+): MemoryStatus {
+  if (frontmatter.status && frontmatter.status !== "active") return frontmatter.status;
+  if (frontmatter.archivedAt) return "archived";
+  if (/[\\/]archive[\\/]/.test(filePath)) return "archived";
+  if (frontmatter.status) return frontmatter.status;
+  return fallbackStatus;
 }
 
 /**
@@ -1184,7 +1213,7 @@ export class StorageManager {
               if (parsed) {
                 memories.push({
                   path: fullPath,
-                  frontmatter: parsed.frontmatter,
+                  frontmatter: normalizeFrontmatterForPath(parsed.frontmatter, fullPath),
                   content: parsed.content,
                 });
               }
@@ -1225,7 +1254,7 @@ export class StorageManager {
               if (parsed) {
                 memories.push({
                   path: fullPath,
-                  frontmatter: parsed.frontmatter,
+                  frontmatter: normalizeFrontmatterForPath(parsed.frontmatter, fullPath),
                   content: parsed.content,
                 });
               }
@@ -1249,7 +1278,11 @@ export class StorageManager {
       const raw = await readFile(filePath, "utf-8");
       const parsed = parseFrontmatter(raw);
       if (!parsed) return null;
-      return { path: filePath, frontmatter: parsed.frontmatter, content: parsed.content };
+      return {
+        path: filePath,
+        frontmatter: normalizeFrontmatterForPath(parsed.frontmatter, filePath),
+        content: parsed.content,
+      };
     } catch {
       return null;
     }
@@ -1840,19 +1873,16 @@ export class StorageManager {
     }
   }
 
-  async readMemoryLifecycleEvents(limit: number = 200): Promise<MemoryLifecycleEvent[]> {
-    const cappedLimit = Math.max(0, Math.floor(limit));
-    if (cappedLimit === 0) return [];
-
+  async readAllMemoryLifecycleEvents(): Promise<MemoryLifecycleEvent[]> {
     try {
       const raw = await readFile(this.memoryLifecycleLedgerPath, "utf-8");
       const out: MemoryLifecycleEvent[] = [];
       const lines = raw.split("\n");
-      for (let i = lines.length - 1; i >= 0 && out.length < cappedLimit; i -= 1) {
-        const line = lines[i]?.trim();
-        if (!line) continue;
+      for (const line of lines) {
+        const row = line.trim();
+        if (!row) continue;
         try {
-          const parsed = JSON.parse(line) as Partial<MemoryLifecycleEvent>;
+          const parsed = JSON.parse(row) as Partial<MemoryLifecycleEvent>;
           if (
             typeof parsed.eventId === "string" &&
             typeof parsed.memoryId === "string" &&
@@ -1867,10 +1897,17 @@ export class StorageManager {
           // Ignore malformed rows (fail-open).
         }
       }
-      return out.reverse();
+      return sortMemoryLifecycleEvents(out);
     } catch {
       return [];
     }
+  }
+
+  async readMemoryLifecycleEvents(limit: number = 200): Promise<MemoryLifecycleEvent[]> {
+    const cappedLimit = Math.max(0, Math.floor(limit));
+    if (cappedLimit === 0) return [];
+    const events = await this.readAllMemoryLifecycleEvents();
+    return events.slice(-cappedLimit);
   }
 
   async writeCompressionGuidelines(content: string): Promise<void> {
@@ -2812,6 +2849,55 @@ export class StorageManager {
   async getMemoryById(id: string): Promise<MemoryFile | null> {
     const memories = await this.readAllMemories();
     return memories.find((m) => m.frontmatter.id === id) ?? null;
+  }
+
+  async getProjectedMemoryState(id: string): Promise<MemoryProjectionCurrentState | null> {
+    const projected = readProjectedMemoryState(this.baseDir, id);
+    if (projected) return projected;
+
+    const active = await this.getMemoryById(id);
+    if (active) return this.toProjectedCurrentState(active, "active");
+
+    const archived = (await this.readArchivedMemories()).find((memory) => memory.frontmatter.id === id);
+    if (!archived) return null;
+
+    return this.toProjectedCurrentState(archived, "archived");
+  }
+
+  private toProjectedCurrentState(
+    memory: MemoryFile,
+    fallbackStatus: MemoryStatus,
+  ): MemoryProjectionCurrentState {
+    return {
+      memoryId: memory.frontmatter.id,
+      category: memory.frontmatter.category,
+      status: inferCurrentStateStatus(memory.frontmatter, memory.path, fallbackStatus),
+      lifecycleState: memory.frontmatter.lifecycleState,
+      path: memory.path,
+      pathRel: path.relative(this.baseDir, memory.path).split(path.sep).join("/"),
+      created: memory.frontmatter.created,
+      updated: memory.frontmatter.updated,
+      archivedAt: memory.frontmatter.archivedAt,
+      supersededAt: memory.frontmatter.supersededAt,
+      entityRef: memory.frontmatter.entityRef,
+      source: memory.frontmatter.source,
+      confidence: memory.frontmatter.confidence,
+      confidenceTier: memory.frontmatter.confidenceTier,
+      memoryKind: memory.frontmatter.memoryKind,
+      accessCount: memory.frontmatter.accessCount,
+      lastAccessed: memory.frontmatter.lastAccessed,
+    };
+  }
+
+  async getMemoryTimeline(memoryId: string, limit: number = 200): Promise<MemoryLifecycleEvent[]> {
+    const cappedLimit = Math.max(0, Math.floor(limit));
+    if (cappedLimit === 0) return [];
+
+    const projected = readProjectedMemoryTimeline(this.baseDir, memoryId, cappedLimit);
+    if (projected && projected.length > 0) return projected;
+
+    const events = await this.readAllMemoryLifecycleEvents();
+    return events.filter((event) => event.memoryId === memoryId).slice(-cappedLimit);
   }
 
   // ---------------------------------------------------------------------------
