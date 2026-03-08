@@ -440,6 +440,62 @@ test("buildResumeBundleFromState assembles transcript, objective-state, work-pro
   assert.equal(bundle.riskFlags?.some((flag) => /checkpoint/i.test(flag)), true);
 });
 
+test("buildResumeBundleFromState filters commitments to open entries before applying the recency cap", async () => {
+  const memoryDir = await mkdtemp(path.join(os.tmpdir(), "engram-resume-bundle-open-filter-"));
+  const sessionKey = "agent:main";
+
+  for (let index = 0; index < 5; index += 1) {
+    await recordCommitmentLedgerEntry({
+      memoryDir,
+      entry: {
+        schemaVersion: 1,
+        entryId: `commitment-closed-${index}`,
+        recordedAt: `2026-03-08T05:0${index}:00.000Z`,
+        sessionKey,
+        source: "cli",
+        kind: "follow_up",
+        state: "fulfilled",
+        scope: "closed commitments",
+        summary: `Closed commitment ${index}`,
+      },
+    });
+  }
+
+  await recordCommitmentLedgerEntry({
+    memoryDir,
+    entry: {
+      schemaVersion: 1,
+      entryId: "commitment-open-older",
+      recordedAt: "2026-03-08T04:59:00.000Z",
+      sessionKey,
+      source: "cli",
+      kind: "deliverable",
+      state: "open",
+      scope: "resume bundles",
+      summary: "Ship the bounded resume bundle builder fix.",
+      dueAt: "2026-03-08T05:05:00.000Z",
+    },
+  });
+
+  const bundle = await buildResumeBundleFromState({
+    memoryDir,
+    sessionKey,
+    bundleId: "resume-open-filter",
+    recordedAt: "2026-03-08T05:10:00.000Z",
+    scope: "PR28 regression",
+    creationMemoryEnabled: true,
+    commitmentLedgerEnabled: true,
+    maxRefsPerStore: 5,
+  });
+
+  assert.deepEqual(bundle.commitmentEntryRefs, ["commitment-open-older"]);
+  assert.deepEqual(bundle.nextActions, ["Ship the bounded resume bundle builder fix."]);
+  assert.equal(
+    bundle.riskFlags?.includes("Overdue commitment: Ship the bounded resume bundle builder fix."),
+    true,
+  );
+});
+
 test("resume-bundle-build CLI command persists a built bundle only when the feature is enabled", async () => {
   const memoryDir = await mkdtemp(path.join(os.tmpdir(), "engram-resume-bundle-build-cli-"));
   const sessionKey = "agent:main";

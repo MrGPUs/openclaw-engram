@@ -163,6 +163,7 @@ async function readCommitmentEntriesForSession(options: {
   commitmentLedgerDir?: string;
   sessionKey: string;
   maxResults?: number;
+  state?: CommitmentLedgerEntry["state"];
 }): Promise<CommitmentLedgerEntry[]> {
   const rootDir = resolveCommitmentLedgerDir(options.memoryDir, options.commitmentLedgerDir);
   const items = await readValidatedItems({
@@ -171,6 +172,7 @@ async function readCommitmentEntriesForSession(options: {
   });
   return items
     .filter((item) => item.sessionKey === options.sessionKey)
+    .filter((item) => (options.state ? item.state === options.state : true))
     .sort((left, right) => right.recordedAt.localeCompare(left.recordedAt))
     .slice(0, options.maxResults ?? DEFAULT_RESUME_BUNDLE_REF_LIMIT);
 }
@@ -248,10 +250,11 @@ export async function buildResumeBundleFromState(options: {
         commitmentLedgerDir: options.commitmentLedgerDir,
         sessionKey: options.sessionKey,
         maxResults: maxRefsPerStore,
+        state: "open",
       })
     : [];
 
-  const openCommitments = commitments.filter((entry) => entry.state === "open");
+  const openCommitments = commitments;
   const recordedAtMs = Date.parse(recordedAt);
   const overdueCommitments = openCommitments.filter((entry) => {
     if (!entry.dueAt) return false;
