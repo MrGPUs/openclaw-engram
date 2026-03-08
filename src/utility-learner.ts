@@ -1,10 +1,9 @@
 import path from "node:path";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { listJsonFiles, readJsonFile } from "./json-store.js";
 import { clamp01 } from "./lifecycle.js";
 import {
+  readUtilityTelemetryEvents,
   resolveUtilityTelemetryDir,
-  validateUtilityTelemetryEvent,
   type UtilityTelemetryDecision,
   type UtilityTelemetryEvent,
   type UtilityTelemetryOutcome,
@@ -210,20 +209,6 @@ async function writeUtilityLearningSnapshot(
   await rename(tempPath, statePath);
 }
 
-async function readUtilityTelemetryEvents(memoryDir: string, utilityTelemetryDir?: string): Promise<UtilityTelemetryEvent[]> {
-  const eventsDir = path.join(resolveUtilityTelemetryDir(memoryDir, utilityTelemetryDir), "events");
-  const files = await listJsonFiles(eventsDir);
-  const events: UtilityTelemetryEvent[] = [];
-  for (const filePath of files) {
-    try {
-      events.push(validateUtilityTelemetryEvent(await readJsonFile(filePath)));
-    } catch {
-      // invalid event files are surfaced by the status path in the telemetry store
-    }
-  }
-  return events;
-}
-
 export async function learnUtilityPromotionWeights(options: {
   memoryDir: string;
   utilityTelemetryDir?: string;
@@ -249,7 +234,12 @@ export async function learnUtilityPromotionWeights(options: {
   const minEventCount = coerceMinEventCount(options.minEventCount);
   const maxWeightMagnitude = coerceMaxWeightMagnitude(options.maxWeightMagnitude);
   const recentEvents = selectRecentEvents(
-    await readUtilityTelemetryEvents(options.memoryDir, options.utilityTelemetryDir),
+    (
+      await readUtilityTelemetryEvents({
+        memoryDir: options.memoryDir,
+        utilityTelemetryDir: options.utilityTelemetryDir,
+      })
+    ).events,
     now,
     windowDays,
   );

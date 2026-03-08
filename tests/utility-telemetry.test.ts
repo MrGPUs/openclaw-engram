@@ -5,6 +5,7 @@ import path from "node:path";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import {
   getUtilityTelemetryStatus,
+  readUtilityTelemetryEvents,
   recordUtilityTelemetryEvent,
   resolveUtilityTelemetryDir,
   validateUtilityTelemetryEvent,
@@ -114,6 +115,43 @@ test("utility telemetry status reports valid and invalid entries", async () => {
   assert.equal(status.events.byOutcome.neutral, 1);
   assert.equal(status.latestEvent?.eventId, "utility-pr29-3");
   assert.match(status.invalidEvents[0]?.path ?? "", /invalid\.json$/);
+});
+
+test("readUtilityTelemetryEvents returns valid events while surfacing invalid files", async () => {
+  const memoryDir = await mkdtemp(path.join(os.tmpdir(), "engram-utility-telemetry-read-"));
+  await recordUtilityTelemetryEvent({
+    memoryDir,
+    event: {
+      schemaVersion: 1,
+      eventId: "utility-pr29-read-1",
+      recordedAt: "2026-03-08T03:47:00.000Z",
+      sessionKey: "agent:main",
+      source: "benchmark",
+      target: "promotion",
+      decision: "hold",
+      outcome: "neutral",
+      utilityScore: 0,
+      summary: "The benchmark run found no measurable utility change for this promotion decision.",
+      tags: ["benchmark"],
+    },
+  });
+  const invalidPath = path.join(
+    memoryDir,
+    "state",
+    "utility-telemetry",
+    "events",
+    "2026-03-08",
+    "invalid-read.json",
+  );
+  await writeFile(invalidPath, JSON.stringify({ schemaVersion: 1, eventId: "" }, null, 2), "utf8");
+
+  const events = await readUtilityTelemetryEvents({ memoryDir });
+
+  assert.equal(events.files.length, 2);
+  assert.equal(events.events.length, 1);
+  assert.equal(events.events[0]?.eventId, "utility-pr29-read-1");
+  assert.equal(events.invalidEvents.length, 1);
+  assert.match(events.invalidEvents[0]?.path ?? "", /invalid-read\.json$/);
 });
 
 test("utility telemetry CLI commands write and report only when the feature is enabled", async () => {
