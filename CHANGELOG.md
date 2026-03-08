@@ -5,12 +5,15 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
-- Generic memory lifecycle ledger foundation: Engram now records append-only `created`, `updated`, `archived`, and `superseded` events under `state/memory-lifecycle-ledger.jsonl`, plus a rebuild utility and CLI for regenerating that ledger from markdown memory state.
+- Generic memory lifecycle ledger foundation: Engram now records append-only `created`, `updated`, `archived`, and `superseded` events under the local `state/memory-lifecycle-ledger.jsonl`, plus a rebuild utility and CLI for regenerating that ledger from markdown memory state.
 
 ### Changed
 - Release automation now promotes `CHANGELOG.md` from `Unreleased` into a dated versioned section during the auto-release workflow, pushes that release commit back to `main`, and no longer relies on PR authors to keep the changelog release ledger in sync by hand.
 - Changelog guard now treats `CHANGELOG.md` as release-workflow owned by default and only validates format when a PR edits the changelog directly.
 - `THEORY.MD` is now ignored and removed from the repo so it does not keep reappearing in commits.
+
+### Fixed
+- Projection and markdown fallback status inference now share one relative-path-based archive/status helper, preventing false `archived` reads when `memoryDir` lives under an ancestor path that happens to contain `/archive/`.
 
 ## [Released after v9.0.0] — 2026-03-07 to 2026-03-08
 
