@@ -130,7 +130,7 @@ export async function recordUtilityTelemetryEvent(options: {
   return filePath;
 }
 
-async function readUtilityTelemetryEvents(options: {
+export async function readUtilityTelemetryEvents(options: {
   memoryDir: string;
   utilityTelemetryDir?: string;
 }): Promise<{
