@@ -527,12 +527,12 @@ def run_search(payload: dict[str, Any]) -> dict[str, Any]:
     )
 
     query_vector, _np2, faiss2 = embed_texts([query], model_id)
-    validate_index_manifest(
-        manifest,
-        requested_model_id=model_id,
-        actual_dimension=int(index.d),
-        expected_dimension=int(query_vector.shape[1]),
-    )
+    query_dimension = int(query_vector.shape[1])
+    if int(manifest["dimension"]) != query_dimension:
+        raise SidecarError(
+            f"index dimension mismatch (manifest={int(manifest['dimension'])}, query={query_dimension}); "
+            "rebuild the FAISS conversation index"
+        )
 
     distances, indices = index.search(query_vector, top_k)
     results: list[dict[str, Any]] = []
