@@ -320,6 +320,13 @@ export interface PluginConfig {
   // Observability
   /** If true, log slow operations (local LLM + related I/O) with durations and metadata (no content). */
   slowLogEnabled: boolean;
+  /**
+   * If true, include the full recalled memory text in `RecallTraceEvent.recalledContent`.
+   * Disabled by default — enable only when you want external trace subscribers (e.g. Langfuse)
+   * to see the exact memory context injected into each conversation turn.
+   * This adds payload to trace events but does not log to files or the gateway log.
+   */
+  traceRecallContent: boolean;
   /** Threshold for slow operation logging (ms). */
   slowLogThresholdMs: number;
   // Extraction stability guards (P0/P1)
@@ -1106,6 +1113,13 @@ export interface RecallTraceEvent {
   identityInjectionTruncated?: boolean;
   durationMs: number;
   timings?: Record<string, string>;
+  /**
+   * The full recalled memory context injected into the system prompt.
+   * Only populated when `traceRecallContent` config option is `true`.
+   * Omitted by default to avoid sending potentially sensitive memory content
+   * to external trace collectors unless explicitly opted in.
+   */
+  recalledContent?: string;
 }
 
 export type EngramTraceEvent = LlmTraceEvent | RecallTraceEvent;

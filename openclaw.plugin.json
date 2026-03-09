@@ -1003,6 +1003,11 @@
         "default": 30000,
         "description": "Threshold for slow operation logging (ms)"
       },
+      "traceRecallContent": {
+        "type": "boolean",
+        "default": false,
+        "description": "If true, include the full recalled memory text in RecallTraceEvent.recalledContent emitted to __openclawEngramTrace subscribers (e.g. Langfuse). Disabled by default — only enable when you want external trace collectors to capture injected memory context."
+      },
       "extractionDedupeEnabled": {
         "type": "boolean",
         "default": true,

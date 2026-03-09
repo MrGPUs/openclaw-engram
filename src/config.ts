@@ -721,6 +721,8 @@ export function parseConfig(raw: unknown): PluginConfig {
     slowLogEnabled: cfg.slowLogEnabled === true,
     slowLogThresholdMs:
       typeof cfg.slowLogThresholdMs === "number" ? cfg.slowLogThresholdMs : 30_000,
+    // Trace recall content — disabled by default; enable to send recalled memory text to trace subscribers
+    traceRecallContent: cfg.traceRecallContent === true,
     // Extraction stability guards (P0/P1)
     extractionDedupeEnabled: cfg.extractionDedupeEnabled !== false,
     extractionDedupeWindowMs:
