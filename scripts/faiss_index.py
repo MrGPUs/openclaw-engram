@@ -214,6 +214,18 @@ def write_index(path: Path, vectors: Any, faiss: Any) -> None:
     os.replace(tmp, path)
 
 
+def resolve_vector_dimension(model_id: str) -> int:
+    probe, _np, _faiss = embed_texts([""], model_id)
+    return int(probe.shape[1])
+
+
+def build_empty_vectors(model_id: str) -> tuple[Any, Any]:
+    np, faiss = load_vector_dependencies()
+    dim = resolve_vector_dimension(model_id)
+    vectors = np.zeros((0, dim), dtype="float32")
+    return vectors, faiss
+
+
 def build_manifest(
     model_id: str,
     vector_dim: int,
@@ -438,6 +450,37 @@ def run_upsert(payload: dict[str, Any]) -> dict[str, Any]:
     return {"ok": True, "upserted": len(chunks)}
 
 
+def run_rebuild(payload: dict[str, Any]) -> dict[str, Any]:
+    model_id = payload.get("modelId")
+    if not isinstance(model_id, str) or not model_id:
+        raise SidecarError("modelId is required")
+
+    index_dir = ensure_index_dir(str(payload.get("indexPath", "")))
+    chunks = parse_chunks(payload)
+
+    lock_path = acquire_index_lock(index_dir)
+    try:
+        meta_path = metadata_file(index_dir)
+        idx_path = index_file(index_dir)
+        manifest_path = manifest_file(index_dir)
+
+        if chunks:
+            texts = [row["text"] for row in chunks]
+            vectors, _np, faiss = embed_texts(texts, model_id)
+            chunk_count = len(chunks)
+        else:
+            vectors, faiss = build_empty_vectors(model_id)
+            chunk_count = 0
+
+        write_index(idx_path, vectors, faiss)
+        write_metadata(meta_path, chunks)
+        write_manifest(manifest_path, build_manifest(model_id, int(vectors.shape[1]), chunk_count))
+    finally:
+        release_index_lock(lock_path)
+
+    return {"ok": True, "rebuilt": len(chunks)}
+
+
 def run_search(payload: dict[str, Any]) -> dict[str, Any]:
     model_id = payload.get("modelId")
     query = payload.get("query")
@@ -545,17 +588,38 @@ def run_health(payload: dict[str, Any]) -> dict[str, Any]:
     return response
 
 
+def run_inspect(payload: dict[str, Any]) -> dict[str, Any]:
+    index_dir = ensure_index_dir(str(payload.get("indexPath", "")))
+    meta_path = metadata_file(index_dir)
+    idx_path = index_file(index_dir)
+    manifest_path = manifest_file(index_dir)
+
+    health = run_health(payload)
+    rows = read_metadata(meta_path)
+    health["metadata"] = {
+        "chunkCount": len(rows),
+        "hasIndex": idx_path.exists(),
+        "hasMetadata": meta_path.exists(),
+        "hasManifest": manifest_path.exists(),
+    }
+    return health
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("command", choices=["upsert", "search", "health"])
+    parser.add_argument("command", choices=["upsert", "rebuild", "search", "health", "inspect"])
     args = parser.parse_args()
 
     try:
         payload = read_payload()
         if args.command == "upsert":
             emit(run_upsert(payload))
+        elif args.command == "rebuild":
+            emit(run_rebuild(payload))
         elif args.command == "search":
             emit(run_search(payload))
+        elif args.command == "inspect":
+            emit(run_inspect(payload))
         else:
             emit(run_health(payload))
         return 0

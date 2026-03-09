@@ -35,7 +35,16 @@ export interface FaissHealthResult {
   };
 }
 
-type SidecarCommand = "upsert" | "search" | "health";
+export interface FaissInspectResult extends FaissHealthResult {
+  metadata: {
+    chunkCount: number;
+    hasIndex: boolean;
+    hasMetadata: boolean;
+    hasManifest: boolean;
+  };
+}
+
+type SidecarCommand = "upsert" | "search" | "health" | "inspect" | "rebuild";
 
 export class FaissAdapterError extends Error {
   constructor(message: string, readonly code: "timeout" | "non_zero_exit" | "malformed_output") {
@@ -48,6 +57,7 @@ interface SidecarResult {
   ok?: boolean;
   error?: string;
   upserted?: number;
+  rebuilt?: number;
   status?: "ok" | "degraded" | "error";
   manifest?: {
     version?: number;
@@ -63,6 +73,12 @@ interface SidecarResult {
     snippet: string;
     score: number;
   }>;
+  metadata?: {
+    chunkCount?: number;
+    hasIndex?: boolean;
+    hasMetadata?: boolean;
+    hasManifest?: boolean;
+  };
 }
 
 export function resolveDefaultFaissScriptPath(fromModuleUrl: string = import.meta.url): string {
@@ -183,6 +199,71 @@ export class FaissConversationIndexAdapter {
             }
           : undefined,
     };
+  }
+
+  async inspect(): Promise<FaissInspectResult> {
+    const payload = {
+      modelId: this.config.modelId,
+      indexPath: this.indexPath,
+    };
+    const result = await this.runCommand("inspect", payload, this.config.healthTimeoutMs);
+    if (result.status !== "ok" && result.status !== "degraded" && result.status !== "error") {
+      throw new FaissAdapterError("FAISS sidecar produced malformed inspect response", "malformed_output");
+    }
+    return {
+      ok: result.ok === true,
+      status: result.status,
+      indexPath: this.indexPath,
+      message: typeof result.error === "string" && result.error.length > 0 ? result.error : undefined,
+      manifest:
+        result.manifest &&
+        typeof result.manifest.version === "number" &&
+        typeof result.manifest.modelId === "string" &&
+        typeof result.manifest.normalizedModelId === "string" &&
+        typeof result.manifest.dimension === "number" &&
+        typeof result.manifest.chunkCount === "number" &&
+        typeof result.manifest.updatedAt === "string" &&
+        typeof result.manifest.lastSuccessfulRebuildAt === "string"
+          ? {
+              version: result.manifest.version,
+              modelId: result.manifest.modelId,
+              normalizedModelId: result.manifest.normalizedModelId,
+              dimension: result.manifest.dimension,
+              chunkCount: result.manifest.chunkCount,
+              updatedAt: result.manifest.updatedAt,
+              lastSuccessfulRebuildAt: result.manifest.lastSuccessfulRebuildAt,
+            }
+          : undefined,
+      metadata: {
+        chunkCount:
+          result.metadata && typeof result.metadata.chunkCount === "number"
+            ? result.metadata.chunkCount
+            : 0,
+        hasIndex: result.metadata?.hasIndex === true,
+        hasMetadata: result.metadata?.hasMetadata === true,
+        hasManifest: result.metadata?.hasManifest === true,
+      },
+    };
+  }
+
+  async rebuildChunks(chunks: ConversationChunk[]): Promise<number> {
+    const payload = {
+      modelId: this.config.modelId,
+      indexPath: this.indexPath,
+      chunks: chunks.map((chunk) => ({
+        id: chunk.id,
+        sessionKey: chunk.sessionKey,
+        text: chunk.text,
+        startTs: chunk.startTs,
+        endTs: chunk.endTs,
+      })),
+    };
+    const result = await this.runCommand("rebuild", payload, this.config.upsertTimeoutMs);
+    const rebuilt = result.rebuilt;
+    if (typeof rebuilt !== "number" || !Number.isFinite(rebuilt)) {
+      throw new FaissAdapterError("FAISS sidecar produced malformed rebuild response", "malformed_output");
+    }
+    return Math.max(0, Math.floor(rebuilt));
   }
 
   private async runCommand(command: SidecarCommand, payload: object, timeoutMs: number): Promise<SidecarResult> {

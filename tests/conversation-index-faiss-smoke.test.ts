@@ -8,7 +8,7 @@ import { spawnSync } from "node:child_process";
 const scriptPath = path.resolve("scripts", "faiss_index.py");
 const pythonBin = process.env.PYTHON_BIN || "python3";
 
-function runSidecar(command: "upsert" | "search" | "health", payload: object) {
+function runSidecar(command: "upsert" | "rebuild" | "search" | "health" | "inspect", payload: object) {
   const proc = spawnSync(pythonBin, [scriptPath, command], {
     input: JSON.stringify(payload),
     encoding: "utf-8",
@@ -127,6 +127,43 @@ test("faiss sidecar health reports manifest metadata after successful upsert", {
     assert.equal(healthResponse.manifest?.normalizedModelId, "__hash__");
     assert.equal(healthResponse.manifest?.dimension, 128);
     assert.equal(healthResponse.manifest?.chunkCount, 1);
+  } finally {
+    rmSync(indexPath, { recursive: true, force: true });
+  }
+});
+
+test("faiss sidecar rebuild and inspect report deterministic metadata", { skip: !hasFaissDeps() }, () => {
+  const indexPath = mkdtempSync(path.join(tmpdir(), "engram-faiss-rebuild-"));
+  try {
+    const rebuildResponse = runSidecar("rebuild", {
+      modelId: "__hash__",
+      indexPath,
+      chunks: [
+        {
+          id: "chunk-1",
+          sessionKey: "session-1",
+          text: "full rebuild smoke",
+          startTs: "2026-02-27T00:00:00.000Z",
+          endTs: "2026-02-27T00:00:05.000Z",
+        },
+      ],
+    });
+
+    assert.equal(rebuildResponse.ok, true);
+    assert.equal(rebuildResponse.rebuilt, 1);
+
+    const inspectResponse = runSidecar("inspect", {
+      modelId: "__hash__",
+      indexPath,
+    });
+
+    assert.equal(inspectResponse.ok, true);
+    assert.equal(inspectResponse.status, "ok");
+    assert.equal(inspectResponse.metadata?.chunkCount, 1);
+    assert.equal(inspectResponse.metadata?.hasIndex, true);
+    assert.equal(inspectResponse.metadata?.hasMetadata, true);
+    assert.equal(inspectResponse.metadata?.hasManifest, true);
+    assert.equal(inspectResponse.manifest?.chunkCount, 1);
   } finally {
     rmSync(indexPath, { recursive: true, force: true });
   }

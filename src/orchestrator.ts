@@ -9,7 +9,7 @@ import { ExtractionEngine } from "./extraction.js";
 import { scoreImportance } from "./importance.js";
 import { findUnresolvedEntityRefs } from "./reconstruct.js";
 import type { SearchBackend } from "./search/port.js";
-import { createSearchBackend, createConversationSearchBackend } from "./search/factory.js";
+import { createSearchBackend, createConversationIndexRuntime } from "./search/factory.js";
 import { NoopSearchBackend } from "./search/noop-backend.js";
 import { StorageManager, ContentHashIndex, normalizeEntityName } from "./storage.js";
 import { ThreadingManager } from "./threading.js";
@@ -88,10 +88,9 @@ import { shouldSkipImplicitExtraction } from "./explicit-capture.js";
 import { chunkTranscriptEntries } from "./conversation-index/chunker.js";
 import { writeConversationChunks } from "./conversation-index/indexer.js";
 import { cleanupConversationChunks } from "./conversation-index/cleanup.js";
-import { FaissConversationIndexAdapter } from "./conversation-index/faiss-adapter.js";
 import {
-  createConversationIndexBackend,
   type ConversationIndexBackend,
+  type ConversationIndexBackendInspection,
   type ConversationQmdRuntime,
 } from "./conversation-index/backend.js";
 import { NamespaceStorageRouter } from "./namespaces/storage.js";
@@ -628,8 +627,8 @@ export class Orchestrator {
   private readonly storageRouter: NamespaceStorageRouter;
   private readonly namespaceSearchRouter: NamespaceSearchRouter;
   qmd: SearchBackend;
-  private readonly conversationQmd?: SearchBackend;
-  private readonly conversationFaiss?: FaissConversationIndexAdapter;
+  private readonly conversationQmd?: ConversationQmdRuntime;
+  private readonly conversationFaiss?: ReturnType<typeof createConversationIndexRuntime>["faiss"];
   private readonly conversationIndexBackend?: ConversationIndexBackend;
   readonly sharedContext?: SharedContextManager;
   readonly compounding?: CompoundingEngine;
@@ -792,29 +791,13 @@ export class Orchestrator {
     this.namespaceSearchRouter = new NamespaceSearchRouter(config, this.storageRouter);
     this.storage = new StorageManager(config.memoryDir);
     this.qmd = createSearchBackend(config);
-    this.conversationQmd = createConversationSearchBackend(config);
-    this.conversationFaiss =
-      config.conversationIndexEnabled && config.conversationIndexBackend === "faiss"
-        ? new FaissConversationIndexAdapter({
-            memoryDir: config.memoryDir,
-            scriptPath: config.conversationIndexFaissScriptPath,
-            pythonBin: config.conversationIndexFaissPythonBin,
-            modelId: config.conversationIndexFaissModelId,
-            indexDir: config.conversationIndexFaissIndexDir,
-            upsertTimeoutMs: config.conversationIndexFaissUpsertTimeoutMs,
-            searchTimeoutMs: config.conversationIndexFaissSearchTimeoutMs,
-            healthTimeoutMs: config.conversationIndexFaissHealthTimeoutMs,
-            maxBatchSize: config.conversationIndexFaissMaxBatchSize,
-            maxSearchK: config.conversationIndexFaissMaxSearchK,
-          })
-        : undefined;
-    this.conversationIndexBackend = createConversationIndexBackend({
-      enabled: config.conversationIndexEnabled,
-      backend: config.conversationIndexBackend,
-      getQmd: () => this.conversationQmd as ConversationQmdRuntime | undefined,
+    const conversationIndexRuntime = createConversationIndexRuntime(config, {
+      getQmd: () => this.conversationQmd,
       getFaiss: () => this.conversationFaiss,
-      collectionDir: path.join(config.memoryDir, "conversation-index"),
     });
+    this.conversationQmd = conversationIndexRuntime.qmd;
+    this.conversationFaiss = conversationIndexRuntime.faiss;
+    this.conversationIndexBackend = conversationIndexRuntime.backend;
     this.sharedContext = config.sharedContextEnabled ? new SharedContextManager(config) : undefined;
     this.compounding = config.compoundingEnabled ? new CompoundingEngine(config) : undefined;
     this.buffer = new SmartBuffer(config, this.storage);
@@ -1455,6 +1438,18 @@ export class Orchestrator {
     }
   }
 
+  private async buildConversationIndexChunks(
+    sessionKey?: string,
+    hours: number = 24,
+  ): Promise<ReturnType<typeof chunkTranscriptEntries>> {
+    const entries = await this.transcript.readRecent(hours, sessionKey);
+    const effectiveSessionKey = sessionKey ?? "all-sessions";
+    return chunkTranscriptEntries(effectiveSessionKey, entries, {
+      maxChars: this.config.conversationRecallMaxChars * 2,
+      maxTurns: Math.max(10, this.config.hourlySummariesMaxTurnsPerRun),
+    });
+  }
+
   async getConversationIndexHealth(): Promise<{
     enabled: boolean;
     backend: "qmd" | "faiss";
@@ -1505,6 +1500,54 @@ export class Orchestrator {
     };
   }
 
+  async inspectConversationIndex(): Promise<ConversationIndexBackendInspection & {
+    enabled: boolean;
+    chunkDocCount: number;
+    lastUpdateAt: string | null;
+  }> {
+    const chunkDocCount = await this.countConversationChunkDocs(this.conversationIndexDir);
+    const lastUpdateAtMs = Math.max(0, ...this.conversationIndexLastUpdateAtMs.values());
+    const lastUpdateAt = lastUpdateAtMs > 0 ? new Date(lastUpdateAtMs).toISOString() : null;
+
+    if (!this.config.conversationIndexEnabled) {
+      return {
+        enabled: false,
+        backend: this.config.conversationIndexBackend,
+        status: "disabled",
+        available: false,
+        indexPath: this.conversationIndexDir,
+        supportsIncrementalUpdate: true,
+        message: "Conversation index disabled by config",
+        metadata: {
+          chunkCount: chunkDocCount,
+        },
+        chunkDocCount,
+        lastUpdateAt,
+      };
+    }
+
+    const inspection = this.conversationIndexBackend
+      ? await this.conversationIndexBackend.inspect()
+      : {
+          backend: this.config.conversationIndexBackend,
+          status: "degraded" as const,
+          available: false,
+          indexPath: this.conversationIndexDir,
+          supportsIncrementalUpdate: true,
+          message: "Conversation index backend unavailable",
+          metadata: {
+            chunkCount: chunkDocCount,
+          },
+        };
+
+    return {
+      enabled: true,
+      chunkDocCount,
+      lastUpdateAt,
+      ...inspection,
+    };
+  }
+
   async getRecoverySummary(sessionKey?: string): Promise<{
     generatedAt: string;
     sessionKey?: string;
@@ -1541,12 +1584,7 @@ export class Orchestrator {
         };
       }
     }
-    // Read transcript history and chunk it into markdown docs for QMD indexing.
-    const entries = await this.transcript.readRecent(hours, sessionKey);
-    const chunks = chunkTranscriptEntries(sessionKey, entries, {
-      maxChars: this.config.conversationRecallMaxChars * 2,
-      maxTurns: Math.max(10, this.config.hourlySummariesMaxTurnsPerRun),
-    });
+    const chunks = await this.buildConversationIndexChunks(sessionKey, hours);
     await writeConversationChunks(this.conversationIndexDir, chunks);
     await cleanupConversationChunks(
       this.conversationIndexDir,
@@ -1562,6 +1600,40 @@ export class Orchestrator {
 
     this.conversationIndexLastUpdateAtMs.set(sessionKey, Date.now());
     return { chunks: chunks.length, skipped: false, embedded };
+  }
+
+  async rebuildConversationIndex(
+    sessionKey?: string,
+    hours: number = 24,
+    opts?: { embed?: boolean },
+  ): Promise<{ chunks: number; skipped: boolean; reason?: string; embedded?: boolean; rebuilt?: boolean }> {
+    if (!this.config.conversationIndexEnabled) {
+      return { chunks: 0, skipped: true, reason: "disabled", embedded: false, rebuilt: false };
+    }
+
+    const chunks = await this.buildConversationIndexChunks(sessionKey, hours);
+    await writeConversationChunks(this.conversationIndexDir, chunks);
+    await cleanupConversationChunks(
+      this.conversationIndexDir,
+      this.config.conversationIndexRetentionDays,
+    );
+
+    const shouldEmbed = opts?.embed ?? this.config.conversationIndexEmbedOnUpdate;
+    let embedded = false;
+    let rebuilt = false;
+    if (this.conversationIndexBackend) {
+      const result = await this.conversationIndexBackend.rebuild(chunks, { embed: shouldEmbed });
+      embedded = result.embedded;
+      rebuilt = result.rebuilt;
+    }
+
+    const stamp = Date.now();
+    if (sessionKey) {
+      this.conversationIndexLastUpdateAtMs.set(sessionKey, stamp);
+    } else {
+      this.conversationIndexLastUpdateAtMs.set("__rebuild__", stamp);
+    }
+    return { chunks: chunks.length, skipped: false, embedded, rebuilt };
   }
 
   /**

@@ -105,6 +105,18 @@ test("conversation recall search routes through the shared backend contract when
       assert.equal(maxResults, 3);
       return [{ path: "backend/chunk-1", snippet: "Backend hit", score: 0.95 }];
     },
+    async update() {
+      throw new Error("unused");
+    },
+    async rebuild() {
+      throw new Error("unused");
+    },
+    async health() {
+      throw new Error("unused");
+    },
+    async inspect() {
+      throw new Error("unused");
+    },
   };
   (orchestrator as any).conversationQmd = {
     isAvailable: () => true,
@@ -229,6 +241,18 @@ test("updateConversationIndex routes writes through the shared backend contract 
       assert.equal(options.embed, true);
       return { embedded: false };
     },
+    async rebuild() {
+      throw new Error("unused");
+    },
+    async search() {
+      throw new Error("unused");
+    },
+    async health() {
+      throw new Error("unused");
+    },
+    async inspect() {
+      throw new Error("unused");
+    },
   };
   (orchestrator as any).conversationQmd = {
     isAvailable: () => true,
@@ -281,6 +305,18 @@ test("conversation index health routes through the shared backend contract when 
         },
       };
     },
+    async search() {
+      throw new Error("unused");
+    },
+    async update() {
+      throw new Error("unused");
+    },
+    async rebuild() {
+      throw new Error("unused");
+    },
+    async inspect() {
+      throw new Error("unused");
+    },
   };
   (orchestrator as any).conversationFaiss = {
     async health() {
@@ -294,4 +330,95 @@ test("conversation index health routes through the shared backend contract when 
   assert.equal(health.backend, "faiss");
   assert.equal(health.status, "ok");
   assert.equal(health.faiss?.indexPath, "/tmp/faiss-index");
+});
+
+test("conversation index inspect routes through the shared backend contract when present", async () => {
+  const orchestrator = await makeOrchestrator({
+    conversationIndexEnabled: true,
+    conversationIndexBackend: "faiss",
+  });
+
+  let inspectCalls = 0;
+  (orchestrator as any).conversationIndexBackend = {
+    kind: "faiss",
+    async inspect() {
+      inspectCalls += 1;
+      return {
+        backend: "faiss",
+        status: "ok",
+        available: true,
+        indexPath: "/tmp/faiss-index",
+        supportsIncrementalUpdate: true,
+        metadata: {
+          chunkCount: 4,
+          hasIndex: true,
+          hasMetadata: true,
+          hasManifest: true,
+        },
+      };
+    },
+    async search() {
+      throw new Error("unused");
+    },
+    async update() {
+      throw new Error("unused");
+    },
+    async rebuild() {
+      throw new Error("unused");
+    },
+    async health() {
+      throw new Error("unused");
+    },
+  };
+
+  const inspection = await orchestrator.inspectConversationIndex();
+  assert.equal(inspectCalls, 1);
+  assert.equal(inspection.enabled, true);
+  assert.equal(inspection.indexPath, "/tmp/faiss-index");
+  assert.equal(inspection.metadata.chunkCount, 4);
+});
+
+test("rebuildConversationIndex routes through the shared backend contract when present", async () => {
+  const orchestrator = await makeOrchestrator({
+    conversationIndexEnabled: true,
+    conversationIndexBackend: "faiss",
+  });
+
+  let rebuildCalls = 0;
+  (orchestrator as any).transcript = {
+    readRecent: async () => [
+      {
+        timestamp: "2026-02-27T00:00:00.000Z",
+        role: "user",
+        content: "rebuild me",
+      },
+    ],
+  };
+  (orchestrator as any).conversationIndexBackend = {
+    kind: "faiss",
+    async rebuild(chunks: unknown[], options: { embed: boolean }) {
+      rebuildCalls += 1;
+      assert.equal(Array.isArray(chunks), true);
+      assert.equal(chunks.length > 0, true);
+      assert.equal(options.embed, false);
+      return { embedded: false, rebuilt: true };
+    },
+    async search() {
+      throw new Error("unused");
+    },
+    async update() {
+      throw new Error("unused");
+    },
+    async health() {
+      throw new Error("unused");
+    },
+    async inspect() {
+      throw new Error("unused");
+    },
+  };
+
+  const result = await orchestrator.rebuildConversationIndex(undefined, 24, { embed: false });
+  assert.equal(rebuildCalls, 1);
+  assert.equal(result.skipped, false);
+  assert.equal(result.rebuilt, true);
 });

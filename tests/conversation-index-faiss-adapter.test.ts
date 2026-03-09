@@ -249,6 +249,62 @@ test("faiss adapter health preserves manifest metadata for diagnostics", async (
   assert.equal(health.manifest?.normalizedModelId, "__hash__");
 });
 
+test("faiss adapter inspect reports artifact metadata", async () => {
+  const proc = new FakeProcess();
+  const spawnFn: typeof childProcess.spawn = () => {
+    process.nextTick(() => {
+      proc.stdout.emit(
+        "data",
+        JSON.stringify({
+          ok: true,
+          status: "degraded",
+          error: "missing manifest",
+          manifest: {
+            version: 1,
+            modelId: "text-embedding-3-small",
+            normalizedModelId: "__hash__",
+            dimension: 128,
+            chunkCount: 2,
+            updatedAt: "2026-03-09T14:30:00Z",
+            lastSuccessfulRebuildAt: "2026-03-09T14:30:00Z",
+          },
+          metadata: {
+            chunkCount: 2,
+            hasIndex: true,
+            hasMetadata: true,
+            hasManifest: false,
+          },
+        }),
+      );
+      proc.emit("close", 0);
+    });
+    return proc as unknown as childProcess.ChildProcess;
+  };
+
+  const adapter = new FaissConversationIndexAdapter(baseConfig(spawnFn));
+  const inspection = await adapter.inspect();
+  assert.equal(inspection.status, "degraded");
+  assert.equal(inspection.metadata.chunkCount, 2);
+  assert.equal(inspection.metadata.hasIndex, true);
+  assert.equal(inspection.metadata.hasManifest, false);
+  assert.equal(inspection.manifest?.dimension, 128);
+});
+
+test("faiss adapter rebuildChunks parses rebuild count", async () => {
+  const proc = new FakeProcess();
+  const spawnFn: typeof childProcess.spawn = () => {
+    process.nextTick(() => {
+      proc.stdout.emit("data", JSON.stringify({ ok: true, rebuilt: 3 }));
+      proc.emit("close", 0);
+    });
+    return proc as unknown as childProcess.ChildProcess;
+  };
+
+  const adapter = new FaissConversationIndexAdapter(baseConfig(spawnFn));
+  const rebuilt = await adapter.rebuildChunks(sampleChunks(3));
+  assert.equal(rebuilt, 3);
+});
+
 test("faiss adapter throws non-zero exit with stderr context", async () => {
   const proc = new FakeProcess();
   const spawnFn: typeof childProcess.spawn = () => {

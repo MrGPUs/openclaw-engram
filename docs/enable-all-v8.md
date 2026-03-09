@@ -89,6 +89,7 @@ Run all commands:
 openclaw engram compat --strict
 openclaw engram stats
 openclaw engram conversation-index-health
+openclaw engram conversation-index-inspect
 openclaw engram graph-health
 openclaw engram tier-status
 openclaw engram policy-status
@@ -99,6 +100,7 @@ Expected:
 - `compat --strict`: exits `0`
 - `stats`: `QMD: available`
 - `conversation-index-health`: `status: "ok"` when backend is `qmd`
+- `conversation-index-inspect`: returns backend metadata and artifact state without mutating the index
 - `graph-health`: JSON report without runtime command failure
 - `tier-status`: returns migration telemetry JSON
 - `policy-status`: returns runtime policy snapshot JSON
