@@ -225,6 +225,7 @@ Key settings:
 | `benchmarkBaselineSnapshotsEnabled` | `false` | Enable versioned baseline snapshot artifacts for the latest completed benchmark runs |
 | `benchmarkDeltaReporterEnabled` | `false` | Enable named-baseline delta reports against the current eval store |
 | `nativeKnowledge.enabled` | `false` | Enable curated workspace and synced native-knowledge recall without converting source docs into durable memory files |
+| `nativeKnowledge.openclawWorkspace` | unset | Optional backend-agnostic adapter for OpenClaw workspace bootstrap docs, handoffs, daily summaries, and automation notes |
 | `nativeKnowledge.obsidianVaults` | `[]` | Optional backend-agnostic Obsidian vault adapters that sync markdown notes, tags, aliases, links, and daily-note dates into native knowledge recall |
 | `entityRetrievalEnabled` | `true` | Enable entity-oriented answer hints for direct entity questions and transcript-backed recent-turn pronoun follow-ups in the active recall namespace |
 | `evalStoreDir` | `{memoryDir}/state/evals` | Root directory for benchmark packs, run summaries, and shadow recall records |
@@ -276,6 +277,14 @@ Example:
   "nativeKnowledge": {
     "enabled": true,
     "includeFiles": ["IDENTITY.md", "MEMORY.md", "TEAM.md"],
+    "openclawWorkspace": {
+      "enabled": true,
+      "bootstrapFiles": ["IDENTITY.md", "MEMORY.md", "USER.md"],
+      "handoffGlobs": ["handoffs/**/*.md"],
+      "dailySummaryGlobs": ["summaries/**/*.md"],
+      "automationNoteGlobs": ["automation/**/*.md"],
+      "sharedSafeGlobs": ["automation/shared/**/*.md"]
+    },
     "obsidianVaults": [
       {
         "id": "personal",
@@ -294,6 +303,8 @@ Example:
   }
 }
 ```
+
+When the OpenClaw workspace adapter is enabled, Engram incrementally syncs only the allowlisted workspace artifacts, preserves source kind plus date/session/workflow/author metadata, tombstones deleted files in backend-agnostic state under `{memoryDir}/state/native-knowledge`, and dedupes exact overlaps against generic `includeFiles` so bootstrap docs are not injected twice.
 
 When an Obsidian vault adapter is enabled, Engram syncs active notes into backend-agnostic native-knowledge state under `{memoryDir}/state/native-knowledge`, preserves aliases, inline/frontmatter tags, wikilinks, optional backlinks, and daily-note dates, and then blends those chunks into the existing `Curated Workspace Knowledge` recall section with namespace filtering applied before injection.
 

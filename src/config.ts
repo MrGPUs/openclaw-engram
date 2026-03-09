@@ -367,6 +367,68 @@ export function parseConfig(raw: unknown): PluginConfig {
             : 2400,
         stateDir:
           normalizeMemoryRelativeDir(rawNativeKnowledge.stateDir, "state/native-knowledge"),
+        openclawWorkspace:
+          rawNativeKnowledge.openclawWorkspace &&
+            typeof rawNativeKnowledge.openclawWorkspace === "object" &&
+            !Array.isArray(rawNativeKnowledge.openclawWorkspace) &&
+            (rawNativeKnowledge.openclawWorkspace as Record<string, unknown>).enabled === true
+            ? {
+              enabled: true,
+              bootstrapFiles: Array.isArray((rawNativeKnowledge.openclawWorkspace as Record<string, unknown>).bootstrapFiles)
+                ? ((rawNativeKnowledge.openclawWorkspace as Record<string, unknown>).bootstrapFiles as unknown[])
+                  .filter((value): value is string => typeof value === "string")
+                  .map((value) => value.trim())
+                  .filter(Boolean)
+                : ["IDENTITY.md", "MEMORY.md", "USER.md"],
+              handoffGlobs: Array.isArray((rawNativeKnowledge.openclawWorkspace as Record<string, unknown>).handoffGlobs)
+                ? ((rawNativeKnowledge.openclawWorkspace as Record<string, unknown>).handoffGlobs as unknown[])
+                  .filter((value): value is string => typeof value === "string")
+                  .map((value) => value.trim())
+                  .filter(Boolean)
+                : ["**/*handoff*.md", "handoffs/**/*.md"],
+              dailySummaryGlobs: Array.isArray((rawNativeKnowledge.openclawWorkspace as Record<string, unknown>).dailySummaryGlobs)
+                ? ((rawNativeKnowledge.openclawWorkspace as Record<string, unknown>).dailySummaryGlobs as unknown[])
+                  .filter((value): value is string => typeof value === "string")
+                  .map((value) => value.trim())
+                  .filter(Boolean)
+                : ["**/*daily*summary*.md", "summaries/**/*.md"],
+              automationNoteGlobs: Array.isArray((rawNativeKnowledge.openclawWorkspace as Record<string, unknown>).automationNoteGlobs)
+                ? ((rawNativeKnowledge.openclawWorkspace as Record<string, unknown>).automationNoteGlobs as unknown[])
+                  .filter((value): value is string => typeof value === "string")
+                  .map((value) => value.trim())
+                  .filter(Boolean)
+                : [],
+              workspaceDocGlobs: Array.isArray((rawNativeKnowledge.openclawWorkspace as Record<string, unknown>).workspaceDocGlobs)
+                ? ((rawNativeKnowledge.openclawWorkspace as Record<string, unknown>).workspaceDocGlobs as unknown[])
+                  .filter((value): value is string => typeof value === "string")
+                  .map((value) => value.trim())
+                  .filter(Boolean)
+                : [],
+              excludeGlobs: [
+                ".git/**",
+                "node_modules/**",
+                "dist/**",
+                "build/**",
+                "coverage/**",
+                "**/*.log",
+                "**/.env*",
+                "**/*.pem",
+                "**/*.key",
+                ...(Array.isArray((rawNativeKnowledge.openclawWorkspace as Record<string, unknown>).excludeGlobs)
+                  ? ((rawNativeKnowledge.openclawWorkspace as Record<string, unknown>).excludeGlobs as unknown[])
+                    .filter((value): value is string => typeof value === "string")
+                    .map((value) => value.trim())
+                    .filter(Boolean)
+                  : []),
+              ].filter((value, index, array) => array.indexOf(value) === index),
+              sharedSafeGlobs: Array.isArray((rawNativeKnowledge.openclawWorkspace as Record<string, unknown>).sharedSafeGlobs)
+                ? ((rawNativeKnowledge.openclawWorkspace as Record<string, unknown>).sharedSafeGlobs as unknown[])
+                  .filter((value): value is string => typeof value === "string")
+                  .map((value) => value.trim())
+                  .filter(Boolean)
+                : [],
+            }
+            : undefined,
         obsidianVaults: Array.isArray(rawNativeKnowledge.obsidianVaults)
           ? (rawNativeKnowledge.obsidianVaults as unknown[])
             .filter((value): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value))

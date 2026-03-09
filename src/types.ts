@@ -76,6 +76,7 @@ export interface NativeKnowledgeConfig {
   maxChars: number;
   stateDir: string;
   obsidianVaults: NativeKnowledgeObsidianVaultConfig[];
+  openclawWorkspace?: NativeKnowledgeOpenClawWorkspaceConfig;
 }
 
 export interface NativeKnowledgeFolderRuleConfig {
@@ -94,6 +95,17 @@ export interface NativeKnowledgeObsidianVaultConfig {
   folderRules: NativeKnowledgeFolderRuleConfig[];
   dailyNotePatterns: string[];
   materializeBacklinks: boolean;
+}
+
+export interface NativeKnowledgeOpenClawWorkspaceConfig {
+  enabled: boolean;
+  bootstrapFiles: string[];
+  handoffGlobs: string[];
+  dailySummaryGlobs: string[];
+  automationNoteGlobs: string[];
+  workspaceDocGlobs: string[];
+  excludeGlobs: string[];
+  sharedSafeGlobs: string[];
 }
 
 export interface AgentAccessHttpConfig {

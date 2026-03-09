@@ -343,6 +343,61 @@
             "default": "state/native-knowledge",
             "description": "Memory-relative directory used for backend-agnostic native knowledge sync state."
           },
+          "openclawWorkspace": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "Optional adapter for OpenClaw workspace artifacts such as bootstrap docs, handoffs, daily summaries, and automation notes.",
+            "properties": {
+              "enabled": {
+                "type": "boolean",
+                "default": false,
+                "description": "Enable the OpenClaw workspace native-knowledge adapter."
+              },
+              "bootstrapFiles": {
+                "type": "array",
+                "items": { "type": "string" },
+                "default": ["IDENTITY.md", "MEMORY.md", "USER.md"],
+                "description": "Workspace-relative bootstrap docs treated as high-confidence native knowledge."
+              },
+              "handoffGlobs": {
+                "type": "array",
+                "items": { "type": "string" },
+                "default": ["**/*handoff*.md", "handoffs/**/*.md"],
+                "description": "Glob patterns (relative to workspaceDir) used to discover handoff notes."
+              },
+              "dailySummaryGlobs": {
+                "type": "array",
+                "items": { "type": "string" },
+                "default": ["**/*daily*summary*.md", "summaries/**/*.md"],
+                "description": "Glob patterns (relative to workspaceDir) used to discover daily summary notes."
+              },
+              "automationNoteGlobs": {
+                "type": "array",
+                "items": { "type": "string" },
+                "default": [],
+                "description": "Optional glob patterns for automation-written status or operating notes."
+              },
+              "workspaceDocGlobs": {
+                "type": "array",
+                "items": { "type": "string" },
+                "default": [],
+                "description": "Optional glob patterns for other explicitly allowlisted workspace docs."
+              },
+              "excludeGlobs": {
+                "type": "array",
+                "items": { "type": "string" },
+                "default": [],
+                "description": "Additional glob patterns appended to the built-in workspace safety excludes."
+              },
+              "sharedSafeGlobs": {
+                "type": "array",
+                "items": { "type": "string" },
+                "default": [],
+                "description": "Optional glob patterns that should be tagged as shared-safe when no explicit privacy class is present."
+              }
+            },
+            "required": ["enabled"]
+          },
           "obsidianVaults": {
             "type": "array",
             "default": [],
