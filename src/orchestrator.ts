@@ -83,6 +83,7 @@ import {
 } from "./native-knowledge.js";
 import { normalizeReplaySessionKey, type ReplayTurn } from "./replay/types.js";
 import type { MemorySummary } from "./types.js";
+import { shouldSkipImplicitExtraction } from "./explicit-capture.js";
 import { chunkTranscriptEntries } from "./conversation-index/chunker.js";
 import { upsertConversationChunksFailOpen, writeConversationChunks } from "./conversation-index/indexer.js";
 import { cleanupConversationChunks } from "./conversation-index/cleanup.js";
@@ -3445,6 +3446,10 @@ export class Orchestrator {
       log.debug(`processTurn: ignoring unsupported role=${String(role)}`);
       return;
     }
+    if (shouldSkipImplicitExtraction(this.config)) {
+      log.debug("processTurn: skipping implicit extraction because captureMode=explicit");
+      return;
+    }
 
     const turn: BufferTurn = {
       role,
@@ -3464,6 +3469,10 @@ export class Orchestrator {
     options: { deadlineMs?: number } = {},
   ): Promise<void> {
     if (!Array.isArray(turns) || turns.length === 0) return;
+    if (shouldSkipImplicitExtraction(this.config)) {
+      log.debug("ingestReplayBatch: skipping implicit extraction because captureMode=explicit");
+      return;
+    }
 
     const bySession = new Map<string, BufferTurn[]>();
     for (const turn of turns) {
