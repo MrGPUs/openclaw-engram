@@ -10,6 +10,7 @@ async function buildNativeKnowledgeRecallHarness(options: {
   enabled: boolean;
   recallSectionEnabled?: boolean;
   vaultDir?: string;
+  openclawWorkspaceEnabled?: boolean;
 }) {
   const root = await mkdtemp(path.join(os.tmpdir(), "engram-native-knowledge-recall-"));
   const memoryDir = path.join(root, "memory");
@@ -44,6 +45,18 @@ async function buildNativeKnowledgeRecallHarness(options: {
       maxResults: 3,
       maxChars: 1200,
       stateDir: "state/native-knowledge",
+      openclawWorkspace: options.openclawWorkspaceEnabled
+        ? {
+          enabled: true,
+          bootstrapFiles: ["IDENTITY.md", "MEMORY.md"],
+          handoffGlobs: ["handoffs/**/*.md"],
+          dailySummaryGlobs: ["summaries/**/*.md"],
+          automationNoteGlobs: ["automation/**/*.md"],
+          workspaceDocGlobs: [],
+          excludeGlobs: [".git/**", "node_modules/**"],
+          sharedSafeGlobs: ["automation/shared/**/*.md"],
+        }
+        : undefined,
       obsidianVaults: options.vaultDir
         ? [
           {
@@ -137,4 +150,86 @@ test("recall blends obsidian native knowledge results into the shared section", 
   assert.match(context, /vault\/2026-03-09\.md:7-7/);
   assert.match(context, /date=2026-03-09/);
   assert.match(context, /Deployment retrospective captured the release checklist/i);
+});
+
+test("recall blends openclaw workspace handoffs with stronger source metadata", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "engram-native-knowledge-openclaw-recall-"));
+  const memoryDir = path.join(root, "memory");
+  const workspaceDir = path.join(root, "workspace");
+  await mkdir(memoryDir, { recursive: true });
+  await mkdir(workspaceDir, { recursive: true });
+  await mkdir(path.join(workspaceDir, "handoffs"), { recursive: true });
+  await mkdir(path.join(workspaceDir, "automation", "shared"), { recursive: true });
+  await writeFile(path.join(workspaceDir, "IDENTITY.md"), "# Identity\n\nPrefers concise responses.\n", "utf-8");
+  await writeFile(path.join(workspaceDir, "MEMORY.md"), "# Memory\n\nThe replay job fails when credentials expire.\n", "utf-8");
+  await writeFile(
+    path.join(workspaceDir, "handoffs", "api-rollout.md"),
+    [
+      "---",
+      "sessionKey: agent:main",
+      "workflowKey: roadmap",
+      "date: 2026-03-09",
+      "---",
+      "# API Rollout Handoff",
+      "",
+      "Next step: verify the replay job before merge.",
+      "",
+    ].join("\n"),
+    "utf-8",
+  );
+  await writeFile(
+    path.join(workspaceDir, "automation", "shared", "status.md"),
+    "# Automation Status\n\nThe automation monitor is watching the replay job.\n",
+    "utf-8",
+  );
+
+  const cfg = parseConfig({
+    openaiApiKey: "test-openai-key",
+    memoryDir,
+    workspaceDir,
+    qmdEnabled: false,
+    transcriptEnabled: false,
+    sharedContextEnabled: false,
+    conversationIndexEnabled: false,
+    hourlySummariesEnabled: false,
+    injectQuestions: false,
+    nativeKnowledge: {
+      enabled: true,
+      includeFiles: ["IDENTITY.md", "MEMORY.md"],
+      maxChunkChars: 400,
+      maxResults: 4,
+      maxChars: 1400,
+      stateDir: "state/native-knowledge",
+      openclawWorkspace: {
+        enabled: true,
+        bootstrapFiles: ["IDENTITY.md", "MEMORY.md"],
+        handoffGlobs: ["handoffs/**/*.md"],
+        dailySummaryGlobs: [],
+        automationNoteGlobs: ["automation/**/*.md"],
+        workspaceDocGlobs: [],
+        excludeGlobs: [".git/**", "node_modules/**"],
+        sharedSafeGlobs: ["automation/shared/**/*.md"],
+      },
+      obsidianVaults: [],
+    },
+    recallPipeline: [
+      {
+        id: "native-knowledge",
+        enabled: true,
+        maxResults: 4,
+        maxChars: 1400,
+      },
+    ],
+  });
+
+  const orchestrator = new Orchestrator(cfg);
+  const context = await (orchestrator as any).recallInternal(
+    "What is the next step before merge for the replay job?",
+    "agent:main",
+  );
+
+  assert.match(context, /## Curated Workspace Knowledge/);
+  assert.match(context, /kind=handoff/);
+  assert.match(context, /session=agent:main/);
+  assert.match(context, /Next step: verify the replay job before merge/i);
 });

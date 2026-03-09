@@ -157,7 +157,21 @@ Supported keys:
 | `nativeKnowledge.maxResults` | `4` | Maximum native knowledge chunks injected into recall. |
 | `nativeKnowledge.maxChars` | `2400` | Maximum total characters injected by the native knowledge section. |
 | `nativeKnowledge.stateDir` | `state/native-knowledge` | `memoryDir`-relative directory used for backend-agnostic adapter sync state. |
+| `nativeKnowledge.openclawWorkspace` | unset | Optional OpenClaw workspace adapter for bootstrap docs, handoffs, daily summaries, and automation notes. |
 | `nativeKnowledge.obsidianVaults` | `[]` | Optional Obsidian vault adapters to sync into native knowledge recall. |
+
+### `nativeKnowledge.openclawWorkspace`
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `enabled` | `false` | Enable the OpenClaw workspace artifact adapter. |
+| `bootstrapFiles` | `["IDENTITY.md","MEMORY.md","USER.md"]` | Workspace-relative bootstrap docs treated as high-confidence native knowledge. |
+| `handoffGlobs` | `["**/*handoff*.md","handoffs/**/*.md"]` | Workspace-relative globs used to discover handoff notes. |
+| `dailySummaryGlobs` | `["**/*daily*summary*.md","summaries/**/*.md"]` | Workspace-relative globs used to discover daily summary notes. |
+| `automationNoteGlobs` | `[]` | Optional workspace-relative globs for automation-written status or operating notes. |
+| `workspaceDocGlobs` | `[]` | Optional workspace-relative globs for other explicitly allowlisted workspace docs. |
+| `excludeGlobs` | `[".git/**","node_modules/**","dist/**","build/**","coverage/**","**/*.log","**/.env*","**/*.pem","**/*.key"]` | Safety exclusions never synced by the workspace adapter. |
+| `sharedSafeGlobs` | `[]` | Optional workspace-relative globs tagged as `shared_safe` when no explicit privacy class is present. |
 
 ### `nativeKnowledge.obsidianVaults` entries
 
@@ -182,6 +196,14 @@ Example:
   "nativeKnowledge": {
     "enabled": true,
     "includeFiles": ["IDENTITY.md", "MEMORY.md", "TEAM.md"],
+    "openclawWorkspace": {
+      "enabled": true,
+      "bootstrapFiles": ["IDENTITY.md", "MEMORY.md", "USER.md"],
+      "handoffGlobs": ["handoffs/**/*.md"],
+      "dailySummaryGlobs": ["summaries/**/*.md"],
+      "automationNoteGlobs": ["automation/**/*.md"],
+      "sharedSafeGlobs": ["automation/shared/**/*.md"]
+    },
     "obsidianVaults": [
       {
         "id": "personal",
@@ -198,6 +220,8 @@ Example:
   }
 }
 ```
+
+The OpenClaw workspace adapter persists incremental sync state and tombstones under `nativeKnowledge.stateDir`, preserves source kind plus date/session/workflow metadata on each chunk when derivable, and dedupes exact overlaps against `includeFiles` so enabling the adapter does not double-inject bootstrap docs.
 
 ## v8.0 Memory OS
 
