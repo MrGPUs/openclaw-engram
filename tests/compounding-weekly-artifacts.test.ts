@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { parseConfig } from "../src/config.js";
@@ -248,4 +248,46 @@ test("rubric provenance stays aligned when repeated feedback reuses the same not
     rubricsMd,
     /Attach evidence window when available _\(source: inbox\.jsonl:L3#agent-a-2026-02-27T10:00:00\.000Z-3\)_/,
   );
+});
+
+test("rubric artifact file names stay distinct when subjects normalize to the same slug", async () => {
+  const memoryDir = tmpDir("engram-compound-rubric-collision-mem");
+  const sharedDir = tmpDir("engram-compound-rubric-collision-shared");
+  await mkdir(path.join(sharedDir, "feedback"), { recursive: true });
+
+  await writeFile(
+    path.join(sharedDir, "feedback", "inbox.jsonl"),
+    [
+      JSON.stringify({
+        agent: "Agent-A",
+        decision: "approved_with_feedback",
+        reason: "keep the first agent distinct",
+        date: "2026-02-25T10:00:00.000Z",
+        learning: "Capture evidence before merge",
+      }),
+      JSON.stringify({
+        agent: "agent_a",
+        decision: "approved_with_feedback",
+        reason: "keep the second agent distinct",
+        date: "2026-02-26T10:00:00.000Z",
+        learning: "Re-check source freshness before merge",
+      }),
+      "",
+    ].join("\n"),
+    "utf-8",
+  );
+
+  const engine = new CompoundingEngine(buildConfig(memoryDir, sharedDir));
+  await engine.synthesizeWeekly({ weekId: "2026-W09" });
+
+  const agentDir = path.join(memoryDir, "compounding", "rubrics", "agents");
+  const agentFiles = (await readdir(agentDir)).filter((name) => name.endsWith(".md")).sort();
+
+  assert.equal(agentFiles.length, 2);
+  assert.ok(agentFiles.every((name) => name.startsWith("agent-a")));
+  assert.notEqual(agentFiles[0], agentFiles[1]);
+
+  const contents = await Promise.all(agentFiles.map((name) => readFile(path.join(agentDir, name), "utf-8")));
+  assert.ok(contents.some((body) => body.includes("Agent Rubric — Agent-A")));
+  assert.ok(contents.some((body) => body.includes("Agent Rubric — agent_a")));
 });

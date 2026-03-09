@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdir, readFile, readdir, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
@@ -221,6 +222,16 @@ function stableMistakeId(
 
 function stableRubricId(kind: "agent" | "workflow", subject: string): string {
   return `${kind}:${stableSlug(subject)}`;
+}
+
+function rubricArtifactFileName(
+  entry: Pick<RubricSnapshotEntry, "kind" | "subject">,
+  slugCollisions: ReadonlyMap<string, number>,
+): string {
+  const slug = stableSlug(entry.subject);
+  if ((slugCollisions.get(slug) ?? 0) <= 1) return `${slug}.md`;
+  const suffix = createHash("sha256").update(`${entry.kind}:${entry.subject}`).digest("hex").slice(0, 8);
+  return `${slug}-${suffix}.md`;
 }
 
 function inferLegacyMistakeScope(pattern: string): { agent: string | null; workflow: string | null } {
@@ -1230,22 +1241,30 @@ export class CompoundingEngine {
       // fail-open
     }
 
+    const slugCollisions = new Map<string, number>();
+    for (const entry of entries) {
+      const slug = stableSlug(entry.subject);
+      slugCollisions.set(slug, (slugCollisions.get(slug) ?? 0) + 1);
+    }
+
     await Promise.all(entries.map(async (entry) => {
+      const observationEntries = this.getRubricObservationEntries(entry);
       const body = [
         `# ${entry.kind === "agent" ? "Agent" : "Workflow"} Rubric — ${entry.subject}`,
         "",
         `Updated: ${entry.updatedAt}`,
         "",
         "## Observations",
-        ...(this.getRubricObservationEntries(entry).length > 0
-          ? this.getRubricObservationEntries(entry).map((item) => `- ${item.note}`)
+        ...(observationEntries.length > 0
+          ? observationEntries.map((item) => `- ${item.note}`)
           : ["- (none yet)"]),
         "",
         "## Provenance",
         ...(entry.provenance.length > 0 ? entry.provenance.map((item) => `- ${item}`) : ["- (none yet)"]),
         "",
       ].join("\n");
-      await writeFile(path.join(dir, `${stableSlug(entry.subject)}.md`), body, "utf-8");
+      const fileName = rubricArtifactFileName(entry, slugCollisions);
+      await writeFile(path.join(dir, fileName), body, "utf-8");
     }));
   }
 
