@@ -205,6 +205,16 @@ function stableRubricId(kind: "agent" | "workflow", subject: string): string {
   return `${kind}:${stableSlug(subject)}`;
 }
 
+function inferLegacyMistakeScope(pattern: string): { agent: string | null; workflow: string | null } {
+  const separatorIndex = pattern.indexOf(":");
+  if (separatorIndex <= 0) return { agent: null, workflow: null };
+  const subject = pattern.slice(0, separatorIndex).trim();
+  return {
+    agent: subject.length > 0 ? subject : null,
+    workflow: null,
+  };
+}
+
 export type TierMigrationCycleTrigger = "extraction" | "maintenance";
 export interface TierMigrationCycleBudget {
   limit: number;
@@ -525,13 +535,15 @@ export class CompoundingEngine {
         const updatedAt = typeof parsed.updatedAt === "string" && parsed.updatedAt.length > 0
           ? parsed.updatedAt
           : new Date(0).toISOString();
-        parsed.registry = parsed.patterns.map((pattern) => ({
-          id: stableMistakeId("feedback", pattern, null, null),
+        parsed.registry = parsed.patterns.map((pattern) => {
+          const scope = inferLegacyMistakeScope(pattern);
+          return {
+            id: stableMistakeId("feedback", pattern, scope.agent, scope.workflow),
           pattern,
           category: "feedback",
           status: "active",
-          agent: null,
-          workflow: null,
+          agent: scope.agent,
+          workflow: scope.workflow,
           tags: [],
           severity: null,
           confidence: null,
@@ -542,7 +554,8 @@ export class CompoundingEngine {
           recurrenceCount: 1,
           lastWeekId: isoWeekId(new Date(updatedAt)),
           evidenceWindow: { start: null, end: null },
-        }));
+          };
+        });
       }
       return parsed;
     } catch {
@@ -859,6 +872,7 @@ export class CompoundingEngine {
       .map(([pattern, provenance]) => ({ pattern, provenance: [...provenance].sort() }))
       .slice(0, 500);
     const previousById = new Map(previousRegistry.map((entry) => [entry.id, entry]));
+    const previousByPattern = new Map(previousRegistry.map((entry) => [entry.pattern, entry]));
     const registry: MistakeRegistryEntry[] = details.map((detail) => {
       const evidence = evidenceByPattern.get(detail.pattern);
       const id = stableMistakeId(
@@ -867,7 +881,7 @@ export class CompoundingEngine {
         evidence?.agent ?? null,
         evidence?.workflow ?? null,
       );
-      const previous = previousById.get(id);
+      const previous = previousById.get(id) ?? previousByPattern.get(detail.pattern);
       const timestamps = (evidence?.timestamps ?? []).filter((value) => typeof value === "string" && value.length > 0).sort();
       const firstSeenAt = previous?.firstSeenAt ?? timestamps[0] ?? new Date().toISOString();
       const lastSeenAt = timestamps[timestamps.length - 1] ?? previous?.lastSeenAt ?? firstSeenAt;
