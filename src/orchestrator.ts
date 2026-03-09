@@ -3006,24 +3006,15 @@ export class Orchestrator {
         timings.compounding = "skip";
         return null;
       }
-      const mistakes = await this.compounding.readMistakes();
-      if (!mistakes || !Array.isArray(mistakes.patterns) || mistakes.patterns.length === 0) {
-        timings.compounding = `${Date.now() - t0}ms`;
-        return null;
-      }
       const maxPatterns = this.getRecallSectionNumber("compounding", "maxPatterns") ?? 40;
+      const maxRubrics = this.getRecallSectionNumber("compounding", "maxRubrics") ?? 4;
       if (maxPatterns === 0) {
         timings.compounding = "skip(limit=0)";
         return null;
       }
-      const lines: string[] = [
-        "## Institutional Learning (Compounded)",
-        "",
-        "Avoid repeating these patterns:",
-        ...mistakes.patterns.slice(0, maxPatterns).map((p) => `- ${p}`),
-      ];
+      const section = await this.compounding.buildRecallSection(retrievalQuery, { maxPatterns, maxRubrics });
       timings.compounding = `${Date.now() - t0}ms`;
-      return lines.join("\n");
+      return section;
     })();
 
     // --- Wait for all parallel work ---

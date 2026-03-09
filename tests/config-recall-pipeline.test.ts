@@ -50,6 +50,7 @@ test("parseConfig accepts custom recall pipeline entries", () => {
     topK: undefined,
     timeoutMs: undefined,
     maxPatterns: undefined,
+    maxRubrics: undefined,
   });
   assert.equal(cfg.recallPipeline[1]?.maxResults, 3);
   assert.equal(cfg.recallPipeline[2]?.enabled, false);

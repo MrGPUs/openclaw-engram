@@ -161,6 +161,7 @@ test("v5 compounding writes weekly report and mistakes.json even with no feedbac
   const mistakes = await eng.readMistakes();
   assert.ok(mistakes);
   assert.equal(mistakes!.patterns.length, 0);
+  assert.deepEqual(mistakes!.registry, []);
 });
 
 test("v5 compounding extracts patterns from feedback learning/rejections", async () => {
@@ -198,6 +199,7 @@ test("v5 compounding extracts patterns from feedback learning/rejections", async
   assert.ok(mistakes);
   assert.ok(mistakes!.patterns.some((p) => p.includes("seo-digest: Always include confidence score")));
   assert.ok(mistakes!.patterns.some((p) => p.includes("client-health: WRONG DATA")));
+  assert.ok(mistakes!.registry?.some((entry) => entry.agent === "seo-digest"));
 });
 
 test("v5 compounding ingests failing memory-action patterns", async () => {
@@ -245,6 +247,32 @@ test("v5 compounding ingests failing memory-action patterns", async () => {
     mistakes!.patterns.some((p) => p.includes("store_note applied")),
     false,
   );
+  assert.ok(mistakes!.registry?.some((entry) => entry.workflow === "memory-actions"));
+});
+
+test("v5 compounding reads legacy mistake files into stable registry form", async () => {
+  const memoryDir = tmpDir("engram-compound-legacy");
+  const sharedDir = tmpDir("engram-compound-legacy-shared");
+  await mkdir(path.join(memoryDir, "compounding"), { recursive: true });
+  await mkdir(sharedDir, { recursive: true });
+
+  await writeFile(
+    path.join(memoryDir, "compounding", "mistakes.json"),
+    JSON.stringify({
+      updatedAt: "2026-02-25T10:00:00.000Z",
+      patterns: ["agent-a: Always include explicit confidence rationale"],
+    }, null, 2),
+    "utf-8",
+  );
+
+  const eng = new CompoundingEngine(minimalConfig(memoryDir, sharedDir));
+  const mistakes = await eng.readMistakes();
+
+  assert.ok(mistakes);
+  assert.equal(mistakes!.patterns.length, 1);
+  assert.equal(mistakes!.registry?.length, 1);
+  assert.equal(mistakes!.registry?.[0]?.recurrenceCount, 1);
+  assert.equal(mistakes!.registry?.[0]?.status, "active");
 });
 
 test("v5 compounding does not read continuity audit references when audits are disabled", async () => {

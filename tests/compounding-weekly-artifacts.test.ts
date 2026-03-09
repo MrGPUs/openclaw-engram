@@ -35,13 +35,20 @@ test("weekly compounding writes rubrics artifact even with no feedback", async (
   const result = await engine.synthesizeWeekly({ weekId: "2026-W09" });
 
   const report = await readFile(result.reportPath, "utf-8");
+  const reportJson = JSON.parse(await readFile(result.reportJsonPath, "utf-8"));
   const rubrics = await readFile(result.rubricsPath, "utf-8");
+  const rubricsIndex = JSON.parse(await readFile(result.rubricsIndexPath, "utf-8"));
 
   assert.match(report, /## Outcome Weighting/);
   assert.match(report, /\(no action outcomes recorded this week\)/);
   assert.match(rubrics, /^# Compounding Rubrics/m);
   assert.match(rubrics, /## Agent Rubrics/);
+  assert.match(rubrics, /## Workflow Rubrics/);
   assert.match(rubrics, /\(none yet\)/);
+  assert.equal(reportJson.weekId, "2026-W09");
+  assert.equal(reportJson.mistakes.count, 0);
+  assert.deepEqual(rubricsIndex.agents, []);
+  assert.deepEqual(rubricsIndex.workflows, []);
 });
 
 test("weekly report includes provenance references for feedback-derived patterns", async () => {
@@ -74,10 +81,58 @@ test("weekly report includes provenance references for feedback-derived patterns
   const engine = new CompoundingEngine(buildConfig(memoryDir, sharedDir));
   const result = await engine.synthesizeWeekly({ weekId: "2026-W09" });
   const report = await readFile(result.reportPath, "utf-8");
+  const reportJson = JSON.parse(await readFile(result.reportJsonPath, "utf-8"));
   const rubrics = await readFile(result.rubricsPath, "utf-8");
+  const agentRubric = await readFile(path.join(memoryDir, "compounding", "rubrics", "agents", "agent-a.md"), "utf-8");
+  const workflowRubric = await readFile(path.join(memoryDir, "compounding", "rubrics", "workflows", "review-loop.md"), "utf-8").catch(() => "");
 
   assert.match(report, /## Patterns \(Avoid \/ Prefer\)/);
   assert.match(report, /source: inbox\.jsonl:L1#agent-a-2026-02-25T10:00:00\.000Z-1/);
   assert.match(report, /source: inbox\.jsonl:L2#agent-b-2026-02-26T11:00:00\.000Z-2/);
   assert.match(rubrics, /source: inbox\.jsonl:L1#agent-a-2026-02-25T10:00:00\.000Z-1/);
+  assert.equal(reportJson.feedback.count, 2);
+  assert.ok(Array.isArray(reportJson.mistakes.registry));
+  assert.match(agentRubric, /Agent Rubric — agent-a/);
+  assert.equal(workflowRubric.length, 0);
+});
+
+test("weekly compounding writes structured json, workflow rubrics, and stable registry recurrence counts", async () => {
+  const memoryDir = tmpDir("engram-compound-weekly-json-mem");
+  const sharedDir = tmpDir("engram-compound-weekly-json-shared");
+  await mkdir(path.join(sharedDir, "feedback"), { recursive: true });
+
+  const feedbackPath = path.join(sharedDir, "feedback", "inbox.jsonl");
+  await writeFile(
+    feedbackPath,
+    [
+      JSON.stringify({
+        agent: "agent-a",
+        workflow: "review-loop",
+        decision: "approved_with_feedback",
+        reason: "tighten confidence thresholds",
+        date: "2026-02-25T10:00:00.000Z",
+        learning: "Include explicit confidence rationale",
+        confidence: 0.8,
+        severity: "medium",
+        tags: ["confidence", "review"],
+      }),
+      "",
+    ].join("\n"),
+    "utf-8",
+  );
+
+  const engine = new CompoundingEngine(buildConfig(memoryDir, sharedDir));
+  const first = await engine.synthesizeWeekly({ weekId: "2026-W09" });
+  const second = await engine.synthesizeWeekly({ weekId: "2026-W09" });
+
+  const weeklyJson = JSON.parse(await readFile(second.reportJsonPath, "utf-8"));
+  const workflowRubric = await readFile(path.join(memoryDir, "compounding", "rubrics", "workflows", "review-loop.md"), "utf-8");
+  const mistakes = await engine.readMistakes();
+
+  assert.equal(weeklyJson.feedback.entries[0].workflow, "review-loop");
+  assert.deepEqual(weeklyJson.feedback.entries[0].tags, ["confidence", "review"]);
+  assert.match(workflowRubric, /Workflow Rubric — review-loop/);
+  assert.ok(mistakes);
+  assert.equal(mistakes!.registry?.[0]?.recurrenceCount, 1);
+  assert.equal(first.reportJsonPath, second.reportJsonPath);
 });
