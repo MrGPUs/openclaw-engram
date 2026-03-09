@@ -231,7 +231,7 @@ function createFaissBackend(
     kind: "faiss",
     async initialize() {
       const health = await failOpenFaissHealth(getFaiss());
-      return health.ok
+      return health.status === "ok"
         ? {
             enabled: true,
             logLevel: "info",
@@ -258,7 +258,7 @@ function createFaissBackend(
       const faiss = await failOpenFaissHealth(getFaiss());
       return {
         backend: "faiss",
-        status: faiss.ok ? "ok" : "degraded",
+        status: faiss.status === "ok" ? "ok" : "degraded",
         message: faiss.message,
         faiss,
       };
@@ -286,8 +286,8 @@ function createFaissBackend(
         const inspection = await adapter.inspect();
         return {
           backend: "faiss",
-          status: inspection.ok ? "ok" : "degraded",
-          available: inspection.ok,
+          status: inspection.status === "ok" ? "ok" : "degraded",
+          available: inspection.status === "ok",
           indexPath: inspection.indexPath,
           supportsIncrementalUpdate: true,
           message: inspection.message,

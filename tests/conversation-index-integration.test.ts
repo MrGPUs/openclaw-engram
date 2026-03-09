@@ -87,6 +87,47 @@ test("conversation recall search fail-opens for faiss backend errors", async () 
   assert.deepEqual(results, []);
 });
 
+test("faiss backend contract preserves degraded status from sidecar diagnostics", async () => {
+  const backend = createConversationIndexBackend({
+    enabled: true,
+    backend: "faiss",
+    faiss: {
+      async health() {
+        return {
+          ok: true,
+          status: "degraded" as const,
+          indexPath: "/tmp/faiss-index",
+          message: "missing manifest",
+        };
+      },
+      async inspect() {
+        return {
+          ok: true,
+          status: "degraded" as const,
+          indexPath: "/tmp/faiss-index",
+          message: "missing manifest",
+          metadata: {
+            chunkCount: 0,
+            hasIndex: false,
+            hasMetadata: false,
+            hasManifest: false,
+          },
+        };
+      },
+    } as any,
+    collectionDir: "/tmp/conversation-index",
+  });
+
+  assert.ok(backend);
+  const health = await backend.health();
+  const inspection = await backend.inspect();
+  const init = await backend.initialize();
+  assert.equal(health.status, "degraded");
+  assert.equal(inspection.status, "degraded");
+  assert.equal(inspection.available, false);
+  assert.equal(init.logLevel, "warn");
+});
+
 test("conversation recall search routes through the shared backend contract when present", async () => {
   const orchestrator = await makeOrchestrator({
     conversationIndexEnabled: true,
