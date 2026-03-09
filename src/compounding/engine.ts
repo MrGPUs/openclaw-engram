@@ -445,7 +445,7 @@ export class CompoundingEngine {
     await writeFile(reportJsonPath, JSON.stringify(weeklyArtifact, null, 2) + "\n", "utf-8");
 
     // Write stable rubric artifact.
-    const rubricsMarkdown = this.formatRubrics(entries, outcomeSummary, rubrics);
+    const rubricsMarkdown = this.formatRubrics(outcomeSummary, rubrics);
     await writeFile(this.rubricsPath, rubricsMarkdown, "utf-8");
     await writeFile(this.rubricsIndexPath, JSON.stringify(rubrics, null, 2) + "\n", "utf-8");
     await this.syncRubricArtifacts(rubrics);
@@ -618,8 +618,10 @@ export class CompoundingEngine {
     query: string,
     opts?: { maxPatterns?: number; maxRubrics?: number },
   ): Promise<string | null> {
-    const mistakes = await this.readMistakes();
-    const rubrics = await this.readRubrics();
+    const [mistakes, rubrics] = await Promise.all([
+      this.readMistakes(),
+      this.readRubrics(),
+    ]);
     const maxPatterns = Math.max(0, Math.floor(opts?.maxPatterns ?? 40));
     const maxRubrics = Math.max(0, Math.floor(opts?.maxRubrics ?? 4));
     const queryTokens = tokenizeRecallQuery(query);
@@ -1155,11 +1157,7 @@ export class CompoundingEngine {
     };
   }
 
-  private formatRubrics(
-    _entries: FeedbackEntryWithProvenance[],
-    outcomeSummary: ActionOutcomeSummary[],
-    snapshot: RubricSnapshot,
-  ): string {
+  private formatRubrics(outcomeSummary: ActionOutcomeSummary[], snapshot: RubricSnapshot): string {
     const lines: string[] = [
       "# Compounding Rubrics",
       "",
