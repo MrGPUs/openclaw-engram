@@ -83,6 +83,10 @@ type RubricSnapshotEntry = {
   observations: string[];
   tags: string[];
   provenance: string[];
+  observationEntries?: Array<{
+    note: string;
+    provenance: string[];
+  }>;
   updatedAt: string;
 };
 
@@ -551,6 +555,8 @@ export class CompoundingEngine {
       const raw = await readFile(this.rubricsIndexPath, "utf-8");
       const parsed = JSON.parse(raw) as RubricSnapshot;
       if (!parsed || !Array.isArray(parsed.agents) || !Array.isArray(parsed.workflows)) return null;
+      parsed.agents = parsed.agents.map((entry) => this.normalizeRubricEntry(entry));
+      parsed.workflows = parsed.workflows.map((entry) => this.normalizeRubricEntry(entry));
       return parsed;
     } catch {
       return null;
@@ -1049,10 +1055,10 @@ export class CompoundingEngine {
         observations: [],
         tags: [],
         provenance: [],
+        observationEntries: [],
         updatedAt,
       };
-      if (!agentEntry.observations.includes(note)) agentEntry.observations.push(note);
-      if (!agentEntry.provenance.includes(provenance)) agentEntry.provenance.push(provenance);
+      this.addRubricObservation(agentEntry, note, provenance);
       agentEntry.tags = normalizeTags([...agentEntry.tags, ...normalizeTags(wrapped.entry.tags)]);
       byAgent.set(wrapped.entry.agent, agentEntry);
 
@@ -1065,10 +1071,10 @@ export class CompoundingEngine {
         observations: [],
         tags: [],
         provenance: [],
+        observationEntries: [],
         updatedAt,
       };
-      if (!workflowEntry.observations.includes(note)) workflowEntry.observations.push(note);
-      if (!workflowEntry.provenance.includes(provenance)) workflowEntry.provenance.push(provenance);
+      this.addRubricObservation(workflowEntry, note, provenance);
       workflowEntry.tags = normalizeTags([...workflowEntry.tags, ...normalizeTags(wrapped.entry.tags)]);
       byWorkflow.set(workflow, workflowEntry);
     }
@@ -1081,12 +1087,14 @@ export class CompoundingEngine {
         observations: [],
         tags: [],
         provenance: [],
+        observationEntries: [],
         updatedAt,
       };
-      workflowEntry.observations.push(
+      this.addRubricObservation(
+        workflowEntry,
         `Outcome weight=${item.weightedScore} (applied=${item.counts.applied}, skipped=${item.counts.skipped}, failed=${item.counts.failed}, unknown=${item.counts.unknown})`,
+        ...item.provenance,
       );
-      workflowEntry.provenance = [...new Set([...workflowEntry.provenance, ...item.provenance])];
       byWorkflow.set(item.action, workflowEntry);
     }
 
@@ -1117,12 +1125,13 @@ export class CompoundingEngine {
     } else {
       for (const rubric of snapshot.agents) {
         lines.push(`### ${rubric.subject}`);
-        if (rubric.observations.length === 0) {
+        const observations = this.getRubricObservationEntries(rubric).slice(0, 8);
+        if (observations.length === 0) {
           lines.push("- No rubric deltas this week.");
         } else {
-          for (const [index, note] of rubric.observations.slice(0, 8).entries()) {
-            const provenance = rubric.provenance[index] ?? rubric.provenance[0];
-            lines.push(`- ${note}${provenance ? ` _(source: ${provenance})_` : ""}`);
+          for (const observation of observations) {
+            const provenance = observation.provenance.join(", ");
+            lines.push(`- ${observation.note}${provenance ? ` _(source: ${provenance})_` : ""}`);
           }
         }
         lines.push("");
@@ -1135,9 +1144,9 @@ export class CompoundingEngine {
     } else {
       for (const rubric of snapshot.workflows) {
         lines.push(`### ${rubric.subject}`);
-        for (const [index, note] of rubric.observations.slice(0, 8).entries()) {
-          const provenance = rubric.provenance[index] ?? rubric.provenance[0];
-          lines.push(`- ${note}${provenance ? ` _(source: ${provenance})_` : ""}`);
+        for (const observation of this.getRubricObservationEntries(rubric).slice(0, 8)) {
+          const provenance = observation.provenance.join(", ");
+          lines.push(`- ${observation.note}${provenance ? ` _(source: ${provenance})_` : ""}`);
         }
         lines.push("");
       }
@@ -1180,7 +1189,9 @@ export class CompoundingEngine {
         `Updated: ${entry.updatedAt}`,
         "",
         "## Observations",
-        ...(entry.observations.length > 0 ? entry.observations.map((item) => `- ${item}`) : ["- (none yet)"]),
+        ...(this.getRubricObservationEntries(entry).length > 0
+          ? this.getRubricObservationEntries(entry).map((item) => `- ${item.note}`)
+          : ["- (none yet)"]),
         "",
         "## Provenance",
         ...(entry.provenance.length > 0 ? entry.provenance.map((item) => `- ${item}`) : ["- (none yet)"]),
@@ -1199,6 +1210,46 @@ export class CompoundingEngine {
       if (entry.subject.toLowerCase().includes(token)) score += 2;
     }
     return score + Math.min(entry.observations.length, 3);
+  }
+
+  private normalizeRubricEntry(entry: RubricSnapshotEntry): RubricSnapshotEntry {
+    const normalizedEntries = this.getRubricObservationEntries(entry);
+    return {
+      ...entry,
+      observations: normalizedEntries.map((item) => item.note),
+      provenance: [...new Set(normalizedEntries.flatMap((item) => item.provenance))],
+      observationEntries: normalizedEntries,
+    };
+  }
+
+  private getRubricObservationEntries(entry: RubricSnapshotEntry): Array<{ note: string; provenance: string[] }> {
+    if (Array.isArray(entry.observationEntries) && entry.observationEntries.length > 0) {
+      return entry.observationEntries.map((item) => ({
+        note: item.note,
+        provenance: [...new Set(item.provenance)].sort(),
+      }));
+    }
+
+    return entry.observations.map((note, index) => ({
+      note,
+      provenance: entry.provenance[index] ? [entry.provenance[index]] : (entry.provenance[0] ? [entry.provenance[0]] : []),
+    }));
+  }
+
+  private addRubricObservation(entry: RubricSnapshotEntry, note: string, ...provenance: string[]): void {
+    const normalized = this.normalizeRubricEntry(entry);
+    const existing = normalized.observationEntries?.find((item) => item.note === note);
+    if (existing) {
+      existing.provenance = [...new Set([...existing.provenance, ...provenance])].sort();
+    } else {
+      normalized.observationEntries?.push({
+        note,
+        provenance: [...new Set(provenance)].sort(),
+      });
+    }
+    entry.observationEntries = normalized.observationEntries;
+    entry.observations = normalized.observationEntries?.map((item) => item.note) ?? [];
+    entry.provenance = [...new Set((normalized.observationEntries ?? []).flatMap((item) => item.provenance))];
   }
 
   private async readNonEmptyFile(filePath: string): Promise<boolean> {

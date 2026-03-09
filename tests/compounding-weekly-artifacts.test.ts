@@ -176,3 +176,74 @@ test("weekly compounding merges split evidence windows across repeated feedback 
   assert.equal(mistakes!.registry?.[0]?.evidenceWindow.start, "2026-02-20T00:00:00.000Z");
   assert.equal(mistakes!.registry?.[0]?.evidenceWindow.end, "2026-02-27T00:00:00.000Z");
 });
+
+test("rubric provenance stays aligned when repeated feedback reuses the same note", async () => {
+  const memoryDir = tmpDir("engram-compound-rubric-prov-mem");
+  const sharedDir = tmpDir("engram-compound-rubric-prov-shared");
+  await mkdir(path.join(sharedDir, "feedback"), { recursive: true });
+
+  await writeFile(
+    path.join(sharedDir, "feedback", "inbox.jsonl"),
+    [
+      JSON.stringify({
+        agent: "agent-a",
+        workflow: "review-loop",
+        decision: "approved_with_feedback",
+        reason: "tighten confidence thresholds",
+        date: "2026-02-25T10:00:00.000Z",
+        learning: "Include explicit confidence rationale",
+      }),
+      JSON.stringify({
+        agent: "agent-a",
+        workflow: "review-loop",
+        decision: "approved_with_feedback",
+        reason: "same lesson, later evidence",
+        date: "2026-02-26T10:00:00.000Z",
+        learning: "Include explicit confidence rationale",
+      }),
+      JSON.stringify({
+        agent: "agent-a",
+        workflow: "review-loop",
+        decision: "approved_with_feedback",
+        reason: "add explicit provenance",
+        date: "2026-02-27T10:00:00.000Z",
+        learning: "Attach evidence window when available",
+      }),
+      "",
+    ].join("\n"),
+    "utf-8",
+  );
+
+  const engine = new CompoundingEngine(buildConfig(memoryDir, sharedDir));
+  const result = await engine.synthesizeWeekly({ weekId: "2026-W09" });
+  const rubrics = JSON.parse(await readFile(result.rubricsIndexPath, "utf-8"));
+  const reviewLoop = rubrics.workflows.find((entry: { subject: string }) => entry.subject === "review-loop");
+
+  assert.ok(reviewLoop);
+  assert.deepEqual(
+    reviewLoop.observationEntries,
+    [
+      {
+        note: "Include explicit confidence rationale",
+        provenance: [
+          "inbox.jsonl:L1#agent-a-2026-02-25T10:00:00.000Z-1",
+          "inbox.jsonl:L2#agent-a-2026-02-26T10:00:00.000Z-2",
+        ],
+      },
+      {
+        note: "Attach evidence window when available",
+        provenance: ["inbox.jsonl:L3#agent-a-2026-02-27T10:00:00.000Z-3"],
+      },
+    ],
+  );
+
+  const rubricsMd = await readFile(result.rubricsPath, "utf-8");
+  assert.match(
+    rubricsMd,
+    /Include explicit confidence rationale _\(source: inbox\.jsonl:L1#agent-a-2026-02-25T10:00:00\.000Z-1, inbox\.jsonl:L2#agent-a-2026-02-26T10:00:00\.000Z-2\)_/,
+  );
+  assert.match(
+    rubricsMd,
+    /Attach evidence window when available _\(source: inbox\.jsonl:L3#agent-a-2026-02-27T10:00:00\.000Z-3\)_/,
+  );
+});
