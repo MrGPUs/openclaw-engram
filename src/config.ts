@@ -1234,6 +1234,7 @@ function parseRecallSectionEntry(raw: unknown): RecallSectionConfig {
     topK: clampNonNegativeNumber(entry.topK),
     timeoutMs: clampNonNegativeNumber(entry.timeoutMs),
     maxPatterns: clampNonNegativeNumber(entry.maxPatterns),
+    maxRubrics: clampNonNegativeNumber(entry.maxRubrics),
   };
 }
 
@@ -1390,6 +1391,7 @@ function buildDefaultRecallPipeline(cfg: Record<string, unknown>): RecallSection
       id: "compounding",
       enabled: cfg.compoundingEnabled === true && cfg.compoundingInjectEnabled !== false,
       maxPatterns: 40,
+      maxRubrics: 4,
     },
     { id: "questions", enabled: cfg.injectQuestions === true },
   ];

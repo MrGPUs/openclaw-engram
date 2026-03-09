@@ -2086,6 +2086,15 @@ Best for:
         date: Type.Optional(Type.String({ description: "ISO timestamp. Defaults to now." })),
         learning: Type.Optional(Type.String({ description: "Optional distilled learning/pattern." })),
         outcome: Type.Optional(Type.String({ description: "Optional downstream outcome (day-one supported; may be empty initially)." })),
+        severity: Type.Optional(Type.String({
+          enum: ["low", "medium", "high"],
+          description: "Optional severity rating for the mistake/outcome.",
+        })),
+        confidence: Type.Optional(Type.Number({ description: "Optional confidence score from 0 to 1." })),
+        workflow: Type.Optional(Type.String({ description: "Optional workflow or playbook name associated with the feedback." })),
+        tags: Type.Optional(Type.Array(Type.String(), { description: "Optional tags for rubric grouping and recall matching." })),
+        evidenceWindowStart: Type.Optional(Type.String({ description: "Optional start timestamp for the evidence window." })),
+        evidenceWindowEnd: Type.Optional(Type.String({ description: "Optional end timestamp for the evidence window." })),
         refs: Type.Optional(Type.Array(Type.String(), { description: "Optional references (URLs, IDs, filenames)." })),
       }),
       async execute(_toolCallId, params) {
@@ -2102,6 +2111,12 @@ Best for:
           date: typeof p.date === "string" && p.date.length > 0 ? p.date : new Date().toISOString(),
           learning: typeof p.learning === "string" ? p.learning : undefined,
           outcome: typeof p.outcome === "string" ? p.outcome : undefined,
+          severity: p.severity === "low" || p.severity === "medium" || p.severity === "high" ? p.severity : undefined,
+          confidence: typeof p.confidence === "number" && Number.isFinite(p.confidence) ? p.confidence : undefined,
+          workflow: typeof p.workflow === "string" ? p.workflow : undefined,
+          tags: Array.isArray(p.tags) ? p.tags.map(String) : undefined,
+          evidenceWindowStart: typeof p.evidenceWindowStart === "string" ? p.evidenceWindowStart : undefined,
+          evidenceWindowEnd: typeof p.evidenceWindowEnd === "string" ? p.evidenceWindowEnd : undefined,
           refs: Array.isArray(p.refs) ? p.refs.map(String) : undefined,
         };
         await orchestrator.sharedContext.appendFeedback(entry);
@@ -2169,7 +2184,7 @@ Best for:
       name: "compounding_weekly_synthesize",
       label: "Synthesize Weekly Learning",
       description:
-        "Generate weekly compounding outputs (v5.0): weekly report + mistakes.json. Designed to work from day one (writes even if no feedback exists yet).",
+        "Generate weekly compounding outputs (v5.0): weekly markdown + JSON reports, stable mistake registry, and rubric artifacts. Designed to work from day one (writes even if no feedback exists yet).",
       parameters: Type.Object({
         weekId: Type.Optional(
           Type.String({
@@ -2187,7 +2202,7 @@ Best for:
         const { weekId } = params as { weekId?: string };
         const res = await orchestrator.compounding.synthesizeWeekly({ weekId });
         return toolResult(
-          `OK\n\nweekId: ${res.weekId}\nreport: ${res.reportPath}\nrubrics: ${res.rubricsPath}\nmistakes: ${res.mistakesCount} patterns\npromotionCandidates: ${res.promotionCandidateCount}`,
+          `OK\n\nweekId: ${res.weekId}\nreport: ${res.reportPath}\nreportJson: ${res.reportJsonPath}\nrubrics: ${res.rubricsPath}\nrubricsIndex: ${res.rubricsIndexPath}\nmistakes: ${res.mistakesCount} patterns\npromotionCandidates: ${res.promotionCandidateCount}`,
         );
       },
     },

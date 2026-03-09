@@ -26,6 +26,7 @@ export interface RecallSectionConfig {
   topK?: number;
   timeoutMs?: number;
   maxPatterns?: number;
+  maxRubrics?: number;
 }
 
 export interface RecallPipelineConfig {
