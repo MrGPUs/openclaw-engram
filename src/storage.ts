@@ -1016,7 +1016,8 @@ export class StorageManager {
   async hasFactContentHash(content: string): Promise<boolean> {
     await this.ensureFactHashIndexAuthoritative();
     const factHashIndex = await this.getFactHashIndex();
-    return factHashIndex.has(content);
+    const sanitized = sanitizeMemoryContent(content);
+    return factHashIndex.has(sanitized.text);
   }
 
   async isFactContentHashAuthoritative(): Promise<boolean> {
