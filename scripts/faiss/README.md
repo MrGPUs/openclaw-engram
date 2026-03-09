@@ -15,6 +15,10 @@ source .venv-faiss/bin/activate
 pip install -r scripts/faiss_requirements.txt
 ```
 
+Optional:
+- Set `ENGRAM_FAISS_ENABLE_ST=1` to enable sentence-transformers embeddings.
+- If that env var is unset, the sidecar uses deterministic hash embeddings and does not require sentence-transformers model downloads.
+
 ## Runtime Modes
 
 - Default mode uses deterministic `__hash__` embeddings to avoid heavy model initialization on per-command subprocess calls.
@@ -48,8 +52,26 @@ Artifacts written by the sidecar:
 
 - `index.faiss`: FAISS index file
 - `metadata.jsonl`: chunk metadata in insertion order
+- `manifest.json`: model/dimension/chunk-count metadata used to reject stale index reuse
+- `.index.lock`: transient file lock used during upserts
+
+Current runtime expectation:
+- Health checks verify dependency availability and whether `index.faiss`, `metadata.jsonl`, and `manifest.json` agree.
+- Search refuses to reuse an index when the saved manifest no longer matches the requested embedding mode/model.
+- Search validates query/index vector dimensions and returns a fail-open error envelope on mismatch.
+
+Operational flow:
+1. Engram writes chunk markdown under `memoryDir/conversation-index/chunks/...`.
+2. `conversation_index_update` calls the sidecar `upsert` command.
+3. `search` reads `index.faiss`, `metadata.jsonl`, and `manifest.json` from the configured `indexPath`.
+4. `health` is safe to call at startup or via `openclaw engram conversation-index-health`.
 
 ## Fail-open Notes
 
 - On validation/dependency errors, sidecar emits `{ "ok": false, "error": "..." }`.
 - Adapter treats this as fail-open and conversation recall degrades without crashing hook execution.
+- Common degraded causes:
+  - missing `faiss` / `numpy` dependencies
+  - missing `sentence-transformers` when `ENGRAM_FAISS_ENABLE_ST=1`
+  - missing local artifacts (`index.faiss`, `metadata.jsonl`, `manifest.json`)
+  - dimension mismatch between the saved index and the current embedding mode/model

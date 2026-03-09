@@ -5,6 +5,7 @@ import path from "node:path";
 import { mkdir } from "node:fs/promises";
 import { parseConfig } from "../src/config.js";
 import { Orchestrator } from "../src/orchestrator.js";
+import { createConversationIndexBackend } from "../src/conversation-index/backend.js";
 
 function tmpDir(prefix: string): string {
   return path.join(os.tmpdir(), `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`);
@@ -40,10 +41,15 @@ test("conversation recall search uses qmd backend when configured", async () => 
 
   (orchestrator as any).conversationQmd = {
     isAvailable: () => true,
+    probe: async () => true,
+    ensureCollection: async () => "ready",
     search: async () => {
       qmdCalls += 1;
       return [{ path: "qmd/chunk-1", snippet: "QMD hit", score: 0.7 }];
     },
+    update: async () => undefined,
+    embed: async () => undefined,
+    debugStatus: () => "ready",
   };
   (orchestrator as any).conversationFaiss = {
     searchChunks: async () => {
@@ -51,6 +57,12 @@ test("conversation recall search uses qmd backend when configured", async () => 
       return [{ path: "faiss/chunk-1", snippet: "FAISS hit", score: 0.9 }];
     },
   };
+  (orchestrator as any).conversationIndexBackend = createConversationIndexBackend({
+    enabled: true,
+    backend: "qmd",
+    qmd: (orchestrator as any).conversationQmd,
+    collectionDir: path.join(orchestrator.config.memoryDir, "conversation-index"),
+  });
 
   const results = await (orchestrator as any).searchConversationRecallResults("query", 3);
   assert.equal(qmdCalls, 1);
@@ -73,6 +85,46 @@ test("conversation recall search fail-opens for faiss backend errors", async () 
 
   const results = await (orchestrator as any).searchConversationRecallResults("query", 3);
   assert.deepEqual(results, []);
+});
+
+test("conversation recall search routes through the shared backend contract when present", async () => {
+  const orchestrator = await makeOrchestrator({
+    conversationIndexEnabled: true,
+    conversationIndexBackend: "faiss",
+  });
+
+  let backendSearchCalls = 0;
+  let qmdCalls = 0;
+  let faissCalls = 0;
+
+  (orchestrator as any).conversationIndexBackend = {
+    kind: "faiss",
+    async search(query: string, maxResults: number) {
+      backendSearchCalls += 1;
+      assert.equal(query, "query");
+      assert.equal(maxResults, 3);
+      return [{ path: "backend/chunk-1", snippet: "Backend hit", score: 0.95 }];
+    },
+  };
+  (orchestrator as any).conversationQmd = {
+    isAvailable: () => true,
+    search: async () => {
+      qmdCalls += 1;
+      return [];
+    },
+  };
+  (orchestrator as any).conversationFaiss = {
+    searchChunks: async () => {
+      faissCalls += 1;
+      return [];
+    },
+  };
+
+  const results = await (orchestrator as any).searchConversationRecallResults("query", 3);
+  assert.equal(backendSearchCalls, 1);
+  assert.equal(qmdCalls, 0);
+  assert.equal(faissCalls, 0);
+  assert.equal(results[0]?.path, "backend/chunk-1");
 });
 
 test("conversation recall section formatting stays backend-agnostic", async () => {
@@ -113,12 +165,18 @@ test("updateConversationIndex routes writes through FAISS backend when selected"
     ],
   };
 
-  (orchestrator as any).conversationFaiss = {
-    upsertChunks: async (chunks: unknown[]) => {
-      upsertCalls += 1;
-      return chunks.length;
-    },
+  const faiss = (orchestrator as any).conversationFaiss;
+  assert.ok(faiss);
+  faiss.upsertChunks = async (chunks: unknown[]) => {
+    upsertCalls += 1;
+    return (chunks as unknown[]).length;
   };
+  (orchestrator as any).conversationIndexBackend = createConversationIndexBackend({
+    enabled: true,
+    backend: "faiss",
+    faiss,
+    collectionDir: path.join(orchestrator.config.memoryDir, "conversation-index"),
+  });
 
   (orchestrator as any).conversationQmd = {
     isAvailable: () => true,
@@ -139,4 +197,101 @@ test("updateConversationIndex routes writes through FAISS backend when selected"
   assert.equal(result.skipped, false);
   assert.equal(result.embedded, false);
   assert.equal(result.chunks > 0, true);
+});
+
+test("updateConversationIndex routes writes through the shared backend contract when present", async () => {
+  const orchestrator = await makeOrchestrator({
+    conversationIndexEnabled: true,
+    conversationIndexBackend: "faiss",
+    conversationIndexEmbedOnUpdate: true,
+  });
+
+  let backendUpdateCalls = 0;
+  let qmdCalls = 0;
+  let faissCalls = 0;
+
+  (orchestrator as any).transcript = {
+    readRecent: async () => [
+      {
+        timestamp: "2026-02-27T00:00:00.000Z",
+        role: "user",
+        content: "hello from transcript",
+      },
+    ],
+  };
+
+  (orchestrator as any).conversationIndexBackend = {
+    kind: "faiss",
+    async update(chunks: unknown[], options: { embed: boolean }) {
+      backendUpdateCalls += 1;
+      assert.equal(Array.isArray(chunks), true);
+      assert.equal(chunks.length > 0, true);
+      assert.equal(options.embed, true);
+      return { embedded: false };
+    },
+  };
+  (orchestrator as any).conversationQmd = {
+    isAvailable: () => true,
+    update: async () => {
+      qmdCalls += 1;
+    },
+    embed: async () => {
+      qmdCalls += 1;
+    },
+  };
+  (orchestrator as any).conversationFaiss = {
+    upsertChunks: async () => {
+      faissCalls += 1;
+      return 1;
+    },
+  };
+
+  const result = await orchestrator.updateConversationIndex("session-b", 24, {
+    enforceMinInterval: false,
+  });
+
+  assert.equal(backendUpdateCalls, 1);
+  assert.equal(qmdCalls, 0);
+  assert.equal(faissCalls, 0);
+  assert.equal(result.skipped, false);
+  assert.equal(result.embedded, false);
+});
+
+test("conversation index health routes through the shared backend contract when present", async () => {
+  const orchestrator = await makeOrchestrator({
+    conversationIndexEnabled: true,
+    conversationIndexBackend: "faiss",
+  });
+
+  let backendHealthCalls = 0;
+  (orchestrator as any).conversationIndexBackend = {
+    kind: "faiss",
+    async health() {
+      backendHealthCalls += 1;
+      return {
+        enabled: true,
+        backend: "faiss",
+        status: "ok",
+        qmdAvailable: undefined,
+        faiss: {
+          ok: true,
+          status: "ok",
+          indexPath: "/tmp/faiss-index",
+          message: undefined,
+        },
+      };
+    },
+  };
+  (orchestrator as any).conversationFaiss = {
+    async health() {
+      throw new Error("should not call raw faiss health");
+    },
+  };
+
+  const health = await orchestrator.getConversationIndexHealth();
+  assert.equal(backendHealthCalls, 1);
+  assert.equal(health.enabled, true);
+  assert.equal(health.backend, "faiss");
+  assert.equal(health.status, "ok");
+  assert.equal(health.faiss?.indexPath, "/tmp/faiss-index");
 });

@@ -1,7 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
-import { rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
@@ -35,6 +34,10 @@ function hasFaissDeps(): boolean {
     timeout: 10_000,
   });
   return probe.status === 0;
+}
+
+function manifestPath(indexPath: string): string {
+  return path.join(indexPath, "manifest.json");
 }
 
 test("faiss sidecar health command returns contract", () => {
@@ -89,6 +92,123 @@ test("faiss sidecar upsert/search smoke with hash model", { skip: !hasFaissDeps(
     assert.equal(searchResponse.ok, true);
     assert.ok(Array.isArray(searchResponse.results));
     assert.ok((searchResponse.results as unknown[]).length > 0);
+  } finally {
+    rmSync(indexPath, { recursive: true, force: true });
+  }
+});
+
+test("faiss sidecar health reports manifest metadata after successful upsert", { skip: !hasFaissDeps() }, () => {
+  const indexPath = mkdtempSync(path.join(tmpdir(), "engram-faiss-health-manifest-"));
+  try {
+    const upsertResponse = runSidecar("upsert", {
+      modelId: "__hash__",
+      indexPath,
+      chunks: [
+        {
+          id: "chunk-1",
+          sessionKey: "session-1",
+          text: "manifest metadata smoke",
+          startTs: "2026-02-27T00:00:00.000Z",
+          endTs: "2026-02-27T00:00:05.000Z",
+        },
+      ],
+    });
+
+    assert.equal(upsertResponse.ok, true);
+
+    const healthResponse = runSidecar("health", {
+      modelId: "__hash__",
+      indexPath,
+    });
+
+    assert.equal(healthResponse.ok, true);
+    assert.equal(healthResponse.status, "ok");
+    assert.equal(typeof healthResponse.manifest, "object");
+    assert.equal(healthResponse.manifest?.normalizedModelId, "__hash__");
+    assert.equal(healthResponse.manifest?.dimension, 128);
+    assert.equal(healthResponse.manifest?.chunkCount, 1);
+  } finally {
+    rmSync(indexPath, { recursive: true, force: true });
+  }
+});
+
+test("faiss sidecar rejects stale manifest model mismatches instead of silently reusing the index", { skip: !hasFaissDeps() }, () => {
+  const indexPath = mkdtempSync(path.join(tmpdir(), "engram-faiss-stale-model-"));
+  try {
+    const upsertResponse = runSidecar("upsert", {
+      modelId: "__hash__",
+      indexPath,
+      chunks: [
+        {
+          id: "chunk-1",
+          sessionKey: "session-1",
+          text: "stale manifest smoke",
+          startTs: "2026-02-27T00:00:00.000Z",
+          endTs: "2026-02-27T00:00:05.000Z",
+        },
+      ],
+    });
+
+    assert.equal(upsertResponse.ok, true);
+
+    const manifest = JSON.parse(readFileSync(manifestPath(indexPath), "utf-8")) as Record<string, unknown>;
+    manifest.normalizedModelId = "sentence-transformers/all-mpnet-base-v2";
+    writeFileSync(manifestPath(indexPath), JSON.stringify(manifest), "utf-8");
+
+    const searchResponse = runSidecar("search", {
+      modelId: "__hash__",
+      indexPath,
+      query: "stale",
+      topK: 1,
+    });
+
+    assert.equal(searchResponse.ok, false);
+    assert.match(String(searchResponse.error), /model mismatch/i);
+  } finally {
+    rmSync(indexPath, { recursive: true, force: true });
+  }
+});
+
+test("faiss sidecar rejects manifest dimension mismatches instead of silently reusing the index", { skip: !hasFaissDeps() }, () => {
+  const indexPath = mkdtempSync(path.join(tmpdir(), "engram-faiss-stale-dim-"));
+  try {
+    const upsertResponse = runSidecar("upsert", {
+      modelId: "__hash__",
+      indexPath,
+      chunks: [
+        {
+          id: "chunk-1",
+          sessionKey: "session-1",
+          text: "dimension mismatch smoke",
+          startTs: "2026-02-27T00:00:00.000Z",
+          endTs: "2026-02-27T00:00:05.000Z",
+        },
+      ],
+    });
+
+    assert.equal(upsertResponse.ok, true);
+
+    const manifest = JSON.parse(readFileSync(manifestPath(indexPath), "utf-8")) as Record<string, unknown>;
+    manifest.dimension = 64;
+    writeFileSync(manifestPath(indexPath), JSON.stringify(manifest), "utf-8");
+
+    const healthResponse = runSidecar("health", {
+      modelId: "__hash__",
+      indexPath,
+    });
+    assert.equal(healthResponse.ok, true);
+    assert.equal(healthResponse.status, "degraded");
+    assert.match(String(healthResponse.error), /dimension mismatch/i);
+
+    const searchResponse = runSidecar("search", {
+      modelId: "__hash__",
+      indexPath,
+      query: "dimension",
+      topK: 1,
+    });
+
+    assert.equal(searchResponse.ok, false);
+    assert.match(String(searchResponse.error), /dimension mismatch/i);
   } finally {
     rmSync(indexPath, { recursive: true, force: true });
   }

@@ -216,6 +216,39 @@ test("faiss adapter honors zero timeout as no timeout", async () => {
   assert.equal(health.status, "ok");
 });
 
+test("faiss adapter health preserves manifest metadata for diagnostics", async () => {
+  const proc = new FakeProcess();
+  const spawnFn: typeof childProcess.spawn = () => {
+    process.nextTick(() => {
+      proc.stdout.emit(
+        "data",
+        JSON.stringify({
+          ok: true,
+          status: "ok",
+          manifest: {
+            version: 1,
+            modelId: "text-embedding-3-small",
+            normalizedModelId: "__hash__",
+            dimension: 128,
+            chunkCount: 3,
+            updatedAt: "2026-03-09T14:30:00Z",
+            lastSuccessfulRebuildAt: "2026-03-09T14:30:00Z",
+          },
+        }),
+      );
+      proc.emit("close", 0);
+    });
+    return proc as unknown as childProcess.ChildProcess;
+  };
+
+  const adapter = new FaissConversationIndexAdapter(baseConfig(spawnFn));
+  const health = await adapter.health();
+  assert.equal(health.manifest?.version, 1);
+  assert.equal(health.manifest?.dimension, 128);
+  assert.equal(health.manifest?.chunkCount, 3);
+  assert.equal(health.manifest?.normalizedModelId, "__hash__");
+});
+
 test("faiss adapter throws non-zero exit with stderr context", async () => {
   const proc = new FakeProcess();
   const spawnFn: typeof childProcess.spawn = () => {

@@ -24,6 +24,15 @@ export interface FaissHealthResult {
   status: "ok" | "degraded" | "error";
   indexPath: string;
   message?: string;
+  manifest?: {
+    version: number;
+    modelId: string;
+    normalizedModelId: string;
+    dimension: number;
+    chunkCount: number;
+    updatedAt: string;
+    lastSuccessfulRebuildAt: string;
+  };
 }
 
 type SidecarCommand = "upsert" | "search" | "health";
@@ -40,6 +49,15 @@ interface SidecarResult {
   error?: string;
   upserted?: number;
   status?: "ok" | "degraded" | "error";
+  manifest?: {
+    version?: number;
+    modelId?: string;
+    normalizedModelId?: string;
+    dimension?: number;
+    chunkCount?: number;
+    updatedAt?: string;
+    lastSuccessfulRebuildAt?: string;
+  };
   results?: Array<{
     path: string;
     snippet: string;
@@ -145,6 +163,25 @@ export class FaissConversationIndexAdapter {
       status: result.status,
       indexPath: this.indexPath,
       message: typeof result.error === "string" && result.error.length > 0 ? result.error : undefined,
+      manifest:
+        result.manifest &&
+        typeof result.manifest.version === "number" &&
+        typeof result.manifest.modelId === "string" &&
+        typeof result.manifest.normalizedModelId === "string" &&
+        typeof result.manifest.dimension === "number" &&
+        typeof result.manifest.chunkCount === "number" &&
+        typeof result.manifest.updatedAt === "string" &&
+        typeof result.manifest.lastSuccessfulRebuildAt === "string"
+          ? {
+              version: result.manifest.version,
+              modelId: result.manifest.modelId,
+              normalizedModelId: result.manifest.normalizedModelId,
+              dimension: result.manifest.dimension,
+              chunkCount: result.manifest.chunkCount,
+              updatedAt: result.manifest.updatedAt,
+              lastSuccessfulRebuildAt: result.manifest.lastSuccessfulRebuildAt,
+            }
+          : undefined,
     };
   }
 

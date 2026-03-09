@@ -86,16 +86,14 @@ import { normalizeReplaySessionKey, type ReplayTurn } from "./replay/types.js";
 import type { MemorySummary } from "./types.js";
 import { shouldSkipImplicitExtraction } from "./explicit-capture.js";
 import { chunkTranscriptEntries } from "./conversation-index/chunker.js";
-import { upsertConversationChunksFailOpen, writeConversationChunks } from "./conversation-index/indexer.js";
+import { writeConversationChunks } from "./conversation-index/indexer.js";
 import { cleanupConversationChunks } from "./conversation-index/cleanup.js";
+import { FaissConversationIndexAdapter } from "./conversation-index/faiss-adapter.js";
 import {
-  FaissConversationIndexAdapter,
-  failOpenFaissHealth,
-} from "./conversation-index/faiss-adapter.js";
-import {
-  searchConversationIndex,
-  searchConversationIndexFaissFailOpen,
-} from "./conversation-index/search.js";
+  createConversationIndexBackend,
+  type ConversationIndexBackend,
+  type ConversationQmdRuntime,
+} from "./conversation-index/backend.js";
 import { NamespaceStorageRouter } from "./namespaces/storage.js";
 import {
   defaultNamespaceForPrincipal,
@@ -632,6 +630,7 @@ export class Orchestrator {
   qmd: SearchBackend;
   private readonly conversationQmd?: SearchBackend;
   private readonly conversationFaiss?: FaissConversationIndexAdapter;
+  private readonly conversationIndexBackend?: ConversationIndexBackend;
   readonly sharedContext?: SharedContextManager;
   readonly compounding?: CompoundingEngine;
   readonly buffer: SmartBuffer;
@@ -809,6 +808,13 @@ export class Orchestrator {
             maxSearchK: config.conversationIndexFaissMaxSearchK,
           })
         : undefined;
+    this.conversationIndexBackend = createConversationIndexBackend({
+      enabled: config.conversationIndexEnabled,
+      backend: config.conversationIndexBackend,
+      getQmd: () => this.conversationQmd as ConversationQmdRuntime | undefined,
+      getFaiss: () => this.conversationFaiss,
+      collectionDir: path.join(config.memoryDir, "conversation-index"),
+    });
     this.sharedContext = config.sharedContextEnabled ? new SharedContextManager(config) : undefined;
     this.compounding = config.compoundingEnabled ? new CompoundingEngine(config) : undefined;
     this.buffer = new SmartBuffer(config, this.storage);
@@ -1119,44 +1125,17 @@ export class Orchestrator {
       }
     }
 
-    if (
-      this.config.conversationIndexEnabled &&
-      this.config.conversationIndexBackend === "qmd" &&
-      this.conversationQmd
-    ) {
-      const available = await this.conversationQmd.probe();
-      if (available) {
-        log.info(`Conversation index QMD: available ${this.conversationQmd.debugStatus()}`);
-        const collectionState = await this.conversationQmd.ensureCollection(
-          path.join(this.config.memoryDir, "conversation-index"),
-        );
-        if (collectionState === "missing") {
-          this.config.conversationIndexEnabled = false;
-          log.warn(
-            "Conversation index collection missing; disabling conversation semantic recall for this runtime",
-          );
-        } else if (collectionState === "unknown") {
-          log.warn(
-            "Conversation index collection check unavailable; keeping conversation semantic recall enabled for fail-open behavior",
-          );
-        } else if (collectionState === "skipped") {
-          log.debug("Conversation index collection check skipped in daemon-only mode");
-        }
-      } else {
-        log.warn(`Conversation index QMD: not available ${this.conversationQmd.debugStatus()}`);
+    if (this.config.conversationIndexEnabled && this.conversationIndexBackend) {
+      const init = await this.conversationIndexBackend.initialize();
+      if (!init.enabled) {
+        this.config.conversationIndexEnabled = false;
       }
-    }
-
-    if (
-      this.config.conversationIndexEnabled &&
-      this.config.conversationIndexBackend === "faiss" &&
-      this.conversationFaiss
-    ) {
-      const health = await failOpenFaissHealth(this.conversationFaiss);
-      if (health.ok) {
-        log.info(`Conversation index FAISS: available (status=${health.status})`);
+      if (init.logLevel === "info") {
+        log.info(init.message);
+      } else if (init.logLevel === "warn") {
+        log.warn(init.message);
       } else {
-        log.warn(`Conversation index FAISS: degraded (${health.message ?? health.status})`);
+        log.debug(init.message);
       }
     }
 
@@ -1430,11 +1409,8 @@ export class Orchestrator {
     retrievalQuery: string,
     topK: number,
   ): Promise<Array<{ path: string; snippet: string; score: number }>> {
-    if (this.config.conversationIndexBackend === "faiss") {
-      return searchConversationIndexFaissFailOpen(this.conversationFaiss, retrievalQuery, topK);
-    }
-    if (this.conversationQmd && this.conversationQmd.isAvailable()) {
-      return searchConversationIndex(this.conversationQmd, retrievalQuery, topK);
+    if (this.conversationIndexBackend) {
+      return this.conversationIndexBackend.search(retrievalQuery, topK);
     }
     return [];
   }
@@ -1491,6 +1467,15 @@ export class Orchestrator {
       status: "ok" | "degraded" | "error";
       indexPath: string;
       message?: string;
+      manifest?: {
+        version: number;
+        modelId: string;
+        normalizedModelId: string;
+        dimension: number;
+        chunkCount: number;
+        updatedAt: string;
+        lastSuccessfulRebuildAt: string;
+      };
     };
   }> {
     const chunkDocCount = await this.countConversationChunkDocs(this.conversationIndexDir);
@@ -1506,34 +1491,17 @@ export class Orchestrator {
         lastUpdateAt,
       };
     }
-
-    if (this.config.conversationIndexBackend === "faiss") {
-      const faiss = await failOpenFaissHealth(this.conversationFaiss);
-      return {
-        enabled: true,
-        backend: "faiss",
-        status: faiss.ok ? "ok" : "degraded",
-        chunkDocCount,
-        lastUpdateAt,
-        faiss,
-      };
-    }
-
-    let qmdAvailable = !!this.conversationQmd?.isAvailable();
-    if (!qmdAvailable && this.conversationQmd) {
-      try {
-        qmdAvailable = await this.conversationQmd.probe();
-      } catch {
-        qmdAvailable = false;
-      }
-    }
+    const backendHealth = this.conversationIndexBackend
+      ? await this.conversationIndexBackend.health()
+      : {
+          backend: this.config.conversationIndexBackend,
+          status: "degraded" as const,
+        };
     return {
       enabled: true,
-      backend: "qmd",
-      status: qmdAvailable ? "ok" : "degraded",
       chunkDocCount,
       lastUpdateAt,
-      qmdAvailable,
+      ...backendHealth,
     };
   }
 
@@ -1587,18 +1555,9 @@ export class Orchestrator {
     const shouldEmbed = opts?.embed ?? this.config.conversationIndexEmbedOnUpdate;
     let embedded = false;
 
-    if (this.config.conversationIndexBackend === "faiss") {
-      await upsertConversationChunksFailOpen(this.conversationFaiss, chunks);
-    } else {
-      // Best-effort: ask qmd to update indexes (will no-op if qmd missing).
-      const q = this.conversationQmd ?? this.qmd;
-      if (q.isAvailable()) {
-        await q.update();
-        if (shouldEmbed) {
-          await q.embed();
-          embedded = true;
-        }
-      }
+    if (this.conversationIndexBackend) {
+      const result = await this.conversationIndexBackend.update(chunks, { embed: shouldEmbed });
+      embedded = result.embedded;
     }
 
     this.conversationIndexLastUpdateAtMs.set(sessionKey, Date.now());

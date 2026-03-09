@@ -408,6 +408,15 @@ export interface ConversationIndexHealthCliOrchestrator {
       status: "ok" | "degraded" | "error";
       indexPath: string;
       message?: string;
+      manifest?: {
+        version: number;
+        modelId: string;
+        normalizedModelId: string;
+        dimension: number;
+        chunkCount: number;
+        updatedAt: string;
+        lastSuccessfulRebuildAt: string;
+      };
     };
   }>;
 }
@@ -729,6 +738,15 @@ export async function runConversationIndexHealthCliCommand(
     status: "ok" | "degraded" | "error";
     indexPath: string;
     message?: string;
+    manifest?: {
+      version: number;
+      modelId: string;
+      normalizedModelId: string;
+      dimension: number;
+      chunkCount: number;
+      updatedAt: string;
+      lastSuccessfulRebuildAt: string;
+    };
   };
 }> {
   return orchestrator.getConversationIndexHealth();

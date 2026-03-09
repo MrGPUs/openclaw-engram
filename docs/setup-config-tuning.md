@@ -102,6 +102,35 @@ Recommended starting config:
 }
 ```
 
+FAISS alternative:
+
+```jsonc
+{
+  "conversationIndexEnabled": true,
+  "conversationIndexBackend": "faiss",
+  "conversationIndexFaissPythonBin": "python3",
+  "conversationIndexFaissModelId": "text-embedding-3-small",
+  "conversationIndexFaissIndexDir": "state/conversation-index/faiss",
+  "conversationIndexFaissUpsertTimeoutMs": 30000,
+  "conversationIndexFaissSearchTimeoutMs": 5000,
+  "conversationIndexFaissHealthTimeoutMs": 2000,
+  "conversationIndexFaissMaxBatchSize": 512,
+  "conversationIndexFaissMaxSearchK": 50,
+  "conversationIndexRetentionDays": 30,
+  "conversationIndexMinUpdateIntervalMs": 900000,
+  "conversationRecallTopK": 4,
+  "conversationRecallMaxChars": 2000,
+  "conversationRecallTimeoutMs": 800
+}
+```
+
+FAISS setup notes:
+- Install the sidecar dependencies with `pip install -r scripts/faiss_requirements.txt`.
+- Set `ENGRAM_FAISS_ENABLE_ST=1` if you want sentence-transformers embeddings. Without it, the sidecar uses deterministic hash embeddings.
+- Expect local FAISS artifacts under `memoryDir/state/conversation-index/faiss/` (`index.faiss`, `metadata.jsonl`, `manifest.json`).
+- Use `openclaw engram conversation-index-health` to confirm the backend is `faiss` and not degraded.
+- If the sidecar is unavailable or the local artifacts are missing, Engram fails open and simply skips semantic transcript recall.
+
 ## 2b) v8.0 Phase 1 (Experimental, Cost-Aware)
 
 Start conservative and enable one flag at a time:

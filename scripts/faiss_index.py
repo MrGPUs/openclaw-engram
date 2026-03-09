@@ -20,6 +20,7 @@ MODEL_CACHE: dict[str, Any] = {}
 HASH_EMBED_DIM = 128
 LOCK_TIMEOUT_SECONDS = 10.0
 LOCK_STALE_SECONDS = 120.0
+MANIFEST_VERSION = 1
 MODEL_ID_ALIASES = {
     "text-embedding-3-small": "sentence-transformers/all-MiniLM-L6-v2",
     "text-embedding-3-large": "sentence-transformers/all-mpnet-base-v2",
@@ -69,6 +70,10 @@ def index_file(index_dir: Path) -> Path:
     return index_dir / "index.faiss"
 
 
+def manifest_file(index_dir: Path) -> Path:
+    return index_dir / "manifest.json"
+
+
 def read_metadata(path: Path) -> list[dict[str, Any]]:
     if not path.exists():
         return []
@@ -108,6 +113,25 @@ def write_metadata(path: Path, rows: list[dict[str, Any]]) -> None:
         for row in rows:
             handle.write(json.dumps(row, separators=(",", ":"), ensure_ascii=False))
             handle.write("\n")
+    os.replace(tmp, path)
+
+
+def read_manifest(path: Path) -> dict[str, Any] | None:
+    if not path.exists():
+        return None
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    return raw if isinstance(raw, dict) else None
+
+
+def write_manifest(path: Path, manifest: dict[str, Any]) -> None:
+    tmp = path.with_suffix(".json.tmp")
+    tmp.write_text(
+        json.dumps(manifest, separators=(",", ":"), ensure_ascii=False),
+        encoding="utf-8",
+    )
     os.replace(tmp, path)
 
 
@@ -188,6 +212,83 @@ def write_index(path: Path, vectors: Any, faiss: Any) -> None:
     tmp = path.with_suffix(".faiss.tmp")
     faiss.write_index(index, str(tmp))
     os.replace(tmp, path)
+
+
+def build_manifest(
+    model_id: str,
+    vector_dim: int,
+    chunk_count: int,
+    *,
+    generated_at: str | None = None,
+) -> dict[str, Any]:
+    normalized_model_id = normalize_model_id(model_id)
+    now_iso = generated_at or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    return {
+        "version": MANIFEST_VERSION,
+        "modelId": model_id,
+        "normalizedModelId": normalized_model_id,
+        "dimension": int(vector_dim),
+        "chunkCount": int(chunk_count),
+        "updatedAt": now_iso,
+        "lastSuccessfulRebuildAt": now_iso,
+    }
+
+
+def validate_index_manifest(
+    manifest: dict[str, Any] | None,
+    *,
+    requested_model_id: str,
+    actual_dimension: int | None = None,
+    expected_dimension: int | None = None,
+) -> dict[str, Any]:
+    if manifest is None:
+        raise SidecarError("missing index manifest; rebuild the FAISS conversation index")
+
+    version = manifest.get("version")
+    if not isinstance(version, int) or version != MANIFEST_VERSION:
+        raise SidecarError("unsupported index manifest version; rebuild the FAISS conversation index")
+
+    normalized_manifest_model_id = manifest.get("normalizedModelId")
+    if not isinstance(normalized_manifest_model_id, str) or not normalized_manifest_model_id:
+        raise SidecarError("index manifest missing normalized model id; rebuild the FAISS conversation index")
+
+    requested_normalized_model_id = normalize_model_id(requested_model_id)
+    if normalized_manifest_model_id != requested_normalized_model_id:
+        raise SidecarError(
+            "index model mismatch "
+            f"(index={normalized_manifest_model_id}, query={requested_normalized_model_id}); "
+            "rebuild the FAISS conversation index"
+        )
+
+    manifest_dimension = manifest.get("dimension")
+    if not isinstance(manifest_dimension, int) or manifest_dimension <= 0:
+        raise SidecarError("index manifest missing vector dimension; rebuild the FAISS conversation index")
+
+    if actual_dimension is not None and manifest_dimension != int(actual_dimension):
+        raise SidecarError(
+            f"index dimension mismatch (manifest={manifest_dimension}, index={int(actual_dimension)}); "
+            "rebuild the FAISS conversation index"
+        )
+
+    if expected_dimension is not None and manifest_dimension != int(expected_dimension):
+        raise SidecarError(
+            f"index dimension mismatch (manifest={manifest_dimension}, query={int(expected_dimension)}); "
+            "rebuild the FAISS conversation index"
+        )
+
+    return {
+        "version": version,
+        "modelId": manifest.get("modelId") if isinstance(manifest.get("modelId"), str) else "",
+        "normalizedModelId": normalized_manifest_model_id,
+        "dimension": manifest_dimension,
+        "chunkCount": manifest.get("chunkCount") if isinstance(manifest.get("chunkCount"), int) else 0,
+        "updatedAt": manifest.get("updatedAt") if isinstance(manifest.get("updatedAt"), str) else "",
+        "lastSuccessfulRebuildAt": (
+            manifest.get("lastSuccessfulRebuildAt")
+            if isinstance(manifest.get("lastSuccessfulRebuildAt"), str)
+            else ""
+        ),
+    }
 
 
 def parse_chunks(payload: dict[str, Any]) -> list[dict[str, Any]]:
@@ -320,6 +421,7 @@ def run_upsert(payload: dict[str, Any]) -> dict[str, Any]:
     try:
         meta_path = metadata_file(index_dir)
         idx_path = index_file(index_dir)
+        manifest_path = manifest_file(index_dir)
         existing = read_metadata(meta_path)
         merged = merge_rows(existing, chunks)
 
@@ -329,6 +431,7 @@ def run_upsert(payload: dict[str, Any]) -> dict[str, Any]:
         # Commit FAISS index first; metadata follows so we never point at missing vectors.
         write_index(idx_path, vectors, faiss)
         write_metadata(meta_path, merged)
+        write_manifest(manifest_path, build_manifest(model_id, int(vectors.shape[1]), len(merged)))
     finally:
         release_index_lock(lock_path)
 
@@ -349,6 +452,7 @@ def run_search(payload: dict[str, Any]) -> dict[str, Any]:
     index_dir = ensure_index_dir(str(payload.get("indexPath", "")))
     meta_path = metadata_file(index_dir)
     idx_path = index_file(index_dir)
+    manifest_path = manifest_file(index_dir)
 
     rows = read_metadata(meta_path)
     if not rows or not idx_path.exists():
@@ -356,12 +460,19 @@ def run_search(payload: dict[str, Any]) -> dict[str, Any]:
 
     _np, faiss = load_vector_dependencies()
     index = faiss.read_index(str(idx_path))
+    manifest = validate_index_manifest(
+        read_manifest(manifest_path),
+        requested_model_id=model_id,
+        actual_dimension=int(index.d),
+    )
 
     query_vector, _np2, faiss2 = embed_texts([query], model_id)
-    if int(index.d) != int(query_vector.shape[1]):
-        raise SidecarError(
-            f"index dimension mismatch (index={index.d}, query={int(query_vector.shape[1])})"
-        )
+    validate_index_manifest(
+        manifest,
+        requested_model_id=model_id,
+        actual_dimension=int(index.d),
+        expected_dimension=int(query_vector.shape[1]),
+    )
 
     distances, indices = index.search(query_vector, top_k)
     results: list[dict[str, Any]] = []
@@ -385,10 +496,12 @@ def run_health(payload: dict[str, Any]) -> dict[str, Any]:
     index_dir = ensure_index_dir(str(payload.get("indexPath", "")))
     meta_path = metadata_file(index_dir)
     idx_path = index_file(index_dir)
+    manifest_path = manifest_file(index_dir)
 
     status = "ok"
     error = ""
     model_id = normalize_model_id(str(payload.get("modelId", "")))
+    manifest_details: dict[str, Any] | None = None
 
     try:
         load_vector_dependencies()
@@ -401,13 +514,34 @@ def run_health(payload: dict[str, Any]) -> dict[str, Any]:
         status = "degraded"
         error = str(exc)
 
-    if not idx_path.exists() or not meta_path.exists():
-        if status == "ok":
-            status = "degraded"
+    if idx_path.exists() or meta_path.exists() or manifest_path.exists():
+        if not idx_path.exists() or not meta_path.exists() or not manifest_path.exists():
+            if status == "ok":
+                status = "degraded"
+            if not error:
+                error = "conversation index artifacts incomplete; rebuild the FAISS conversation index"
+        else:
+            try:
+                _np, faiss = load_vector_dependencies()
+                index = faiss.read_index(str(idx_path))
+                manifest_details = validate_index_manifest(
+                    read_manifest(manifest_path),
+                    requested_model_id=model_id,
+                    actual_dimension=int(index.d),
+                )
+            except Exception as exc:
+                if status == "ok":
+                    status = "degraded"
+                if not error:
+                    error = str(exc)
+    elif status == "ok":
+        status = "degraded"
 
     response: dict[str, Any] = {"ok": True, "status": status}
     if error:
         response["error"] = error
+    if manifest_details is not None:
+        response["manifest"] = manifest_details
     return response
 
 
