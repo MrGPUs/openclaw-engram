@@ -386,8 +386,8 @@
               "excludeGlobs": {
                 "type": "array",
                 "items": { "type": "string" },
-                "default": [".git/**", "node_modules/**", "dist/**", "build/**", "coverage/**", "**/*.log", "**/.env*", "**/*.pem", "**/*.key"],
-                "description": "Glob patterns that are never synced by the workspace adapter."
+                "default": [],
+                "description": "Additional glob patterns appended to the built-in workspace safety excludes."
               },
               "sharedSafeGlobs": {
                 "type": "array",

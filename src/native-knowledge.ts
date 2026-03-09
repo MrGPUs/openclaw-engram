@@ -661,18 +661,18 @@ function deriveOpenClawArtifactMetadata(options: {
 function buildOpenClawWorkspaceChunks(options: {
   sourcePath: string;
   sourceKind: "bootstrap_doc" | "handoff" | "daily_summary" | "automation_note" | "workspace_doc";
-  content: string;
+  body: string;
+  bodyStartLine: number;
   maxChunkChars: number;
   sourceHash: string;
   mtimeMs: number;
   metadata: Pick<NativeKnowledgeChunk, "derivedDate" | "sessionKey" | "workflowKey" | "author" | "agent" | "namespace" | "privacyClass">;
 }): NativeKnowledgeChunk[] {
-  const parsed = parseFrontmatter(options.content);
   return chunkHeadingAware({
     sourcePath: options.sourcePath,
-    content: parsed.body,
+    content: options.body,
     maxChunkChars: options.maxChunkChars,
-    startLineOffset: parsed.bodyStartLine - 1,
+    startLineOffset: options.bodyStartLine - 1,
     createChunk: ({ title, startLine, endLine, content }) => ({
       chunkId: `${options.sourceKind}:${options.sourcePath}:${startLine}-${endLine}`,
       sourcePath: options.sourcePath,
@@ -1129,7 +1129,8 @@ export async function syncOpenClawWorkspaceArtifacts(options: {
     const chunks = buildOpenClawWorkspaceChunks({
       sourcePath: candidate.sourcePath,
       sourceKind: candidate.sourceKind,
-      content,
+      body: parsed.body,
+      bodyStartLine: parsed.bodyStartLine,
       maxChunkChars: options.config.maxChunkChars,
       sourceHash,
       mtimeMs: info.mtimeMs,

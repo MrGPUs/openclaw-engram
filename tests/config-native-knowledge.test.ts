@@ -128,7 +128,17 @@ test("parseConfig sanitizes openclaw workspace adapter settings", () => {
     dailySummaryGlobs: ["summaries/daily/**/*.md"],
     automationNoteGlobs: ["automation/**/*.md"],
     workspaceDocGlobs: ["docs/**/*.md"],
-    excludeGlobs: ["node_modules/**"],
+    excludeGlobs: [
+      ".git/**",
+      "node_modules/**",
+      "dist/**",
+      "build/**",
+      "coverage/**",
+      "**/*.log",
+      "**/.env*",
+      "**/*.pem",
+      "**/*.key",
+    ],
     sharedSafeGlobs: ["shared/**/*.md"],
   });
 });

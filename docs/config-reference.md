@@ -170,7 +170,7 @@ Supported keys:
 | `dailySummaryGlobs` | `["**/*daily*summary*.md","summaries/**/*.md"]` | Workspace-relative globs used to discover daily summary notes. |
 | `automationNoteGlobs` | `[]` | Optional workspace-relative globs for automation-written status or operating notes. |
 | `workspaceDocGlobs` | `[]` | Optional workspace-relative globs for other explicitly allowlisted workspace docs. |
-| `excludeGlobs` | `[".git/**","node_modules/**","dist/**","build/**","coverage/**","**/*.log","**/.env*","**/*.pem","**/*.key"]` | Safety exclusions never synced by the workspace adapter. |
+| `excludeGlobs` | `[]` | Additional excludes appended to the built-in safety exclusions (`.git/**`, `node_modules/**`, `dist/**`, `build/**`, `coverage/**`, `**/*.log`, `**/.env*`, `**/*.pem`, `**/*.key`). |
 | `sharedSafeGlobs` | `[]` | Optional workspace-relative globs tagged as `shared_safe` when no explicit privacy class is present. |
 
 ### `nativeKnowledge.obsidianVaults` entries
