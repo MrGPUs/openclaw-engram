@@ -1209,6 +1209,7 @@ export class CompoundingEngine {
       if (haystack.includes(token)) score += 2;
       if (entry.subject.toLowerCase().includes(token)) score += 2;
     }
+    if (score === 0) return 0;
     return score + Math.min(entry.observations.length, 3);
   }
 

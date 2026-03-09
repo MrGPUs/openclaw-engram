@@ -106,3 +106,44 @@ test("orchestrator keeps rubric-only compounding recall when maxPatterns is zero
   assert.match(context, /Active rubrics:/);
   assert.match(context, /workflow review-loop:/);
 });
+
+test("compounding recall excludes unrelated rubrics when the query has no rubric match", async () => {
+  const memoryDir = tmpDir("engram-compound-recall-filter-mem");
+  const sharedDir = tmpDir("engram-compound-recall-filter-shared");
+  await mkdir(path.join(sharedDir, "feedback"), { recursive: true });
+
+  await writeFile(
+    path.join(sharedDir, "feedback", "inbox.jsonl"),
+    [
+      JSON.stringify({
+        agent: "planner",
+        workflow: "review-loop",
+        decision: "approved_with_feedback",
+        reason: "missing evidence window",
+        date: "2026-02-25T10:00:00.000Z",
+        learning: "Always cite the evidence window in review-loop summaries",
+        tags: ["review-loop", "evidence"],
+      }),
+      JSON.stringify({
+        agent: "researcher",
+        workflow: "citation-audit",
+        decision: "approved_with_feedback",
+        reason: "missing citations",
+        date: "2026-02-25T11:00:00.000Z",
+        learning: "Attach citations before shipping citation-audit output",
+        tags: ["citations", "audit"],
+      }),
+      "",
+    ].join("\n"),
+    "utf-8",
+  );
+
+  const engine = new CompoundingEngine(buildConfig(memoryDir, sharedDir));
+  await engine.synthesizeWeekly({ weekId: "2026-W09" });
+
+  const recallSection = await engine.buildRecallSection("review-loop evidence policy", { maxPatterns: 0, maxRubrics: 2 });
+
+  assert.ok(recallSection);
+  assert.match(recallSection!, /workflow review-loop:/);
+  assert.equal(recallSection!.includes("citation-audit"), false);
+});
