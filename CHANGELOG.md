@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [v7.2.6] - 2026-03-10
+
 ### Added
 - Generic memory lifecycle ledger foundation: Engram now records append-only `created`, `updated`, `archived`, and `superseded` events under the local `state/memory-lifecycle-ledger.jsonl`, plus a rebuild utility and CLI for regenerating that ledger from markdown memory state.
 
